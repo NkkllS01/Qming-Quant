@@ -638,6 +638,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         result = LiveOrderExecutionService(
             gateway=services.gateway,
             trading_gate=gate,
+            live_state_repository=services.live_state_repository,
             instrument_repository=services.instrument_repository,
         ).check_order(intent)
         gate_reason = result.trading_gate.reason if result.trading_gate is not None else "not_checked"

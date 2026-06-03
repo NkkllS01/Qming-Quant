@@ -179,6 +179,47 @@ def test_live_order_execution_check_order_allows_without_placing() -> None:
     assert gateway.placed == []
 
 
+def test_live_order_execution_rejects_duplicate_active_client_order_id_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    repository = LiveStateRepository("sqlite:///:memory:")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+        live_state_repository=repository,
+    )
+    _seed_submitted_order(service)
+
+    result = service.submit_order(_intent())
+
+    assert result.status == "local_state_rejected"
+    assert result.reason == "duplicate_client_order_id"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
+def test_live_order_execution_allows_reusing_client_order_id_after_terminal_order() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    repository = LiveStateRepository("sqlite:///:memory:")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+        live_state_repository=repository,
+    )
+    _seed_submitted_order(service)
+    store = repository.load_snapshot(account_id="okx_sub_main")
+    existing = store.orders["okx-1"]
+    store.upsert_order(existing.model_copy(update={"status": "filled"}))
+    repository.save_snapshot(account_id="okx_sub_main", store=store)
+
+    result = service.check_order(_intent())
+
+    assert result.status == "allowed"
+    assert result.reason == "order_check_passed"
+    assert trading_gate.evaluations == 1
+
+
 def test_live_order_execution_places_order_when_gate_allows() -> None:
     gateway = FakeGateway()
     service = LiveOrderExecutionService(

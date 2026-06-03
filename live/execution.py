@@ -130,6 +130,15 @@ class LiveOrderExecutionService:
                 policy=policy_result,
                 trading_gate=None,
             )
+        duplicate_order = self._find_active_order_by_client_id(intent)
+        if duplicate_order is not None:
+            return LiveOrderCheckResult(
+                status="local_state_rejected",
+                reason="duplicate_client_order_id",
+                intent=intent,
+                policy=policy_result,
+                trading_gate=None,
+            )
         gate_result = self.trading_gate.evaluate()
         if not gate_result.trading_allowed:
             return LiveOrderCheckResult(
@@ -145,6 +154,21 @@ class LiveOrderExecutionService:
             intent=intent,
             policy=policy_result,
             trading_gate=gate_result,
+        )
+
+    def _find_active_order_by_client_id(self, intent: OrderIntent) -> Order | None:
+        if self.live_state_repository is None:
+            return None
+        store = self.live_state_repository.load_snapshot(account_id=intent.account_id)
+        return next(
+            (
+                order
+                for order in store.orders.values()
+                if order.client_order_id == intent.client_order_id
+                and order.symbol == intent.symbol
+                and _is_active_order_status(order.status)
+            ),
+            None,
         )
 
     def submit_order(self, intent: OrderIntent) -> LiveOrderExecutionResult:
@@ -310,3 +334,14 @@ def _is_multiple(value: Decimal, step: Decimal) -> bool:
     if step <= 0:
         return False
     return value % step == 0
+
+
+def _is_active_order_status(status: str) -> bool:
+    return status.lower() not in {
+        "filled",
+        "canceled",
+        "cancelled",
+        "rejected",
+        "exchange_rejected",
+        "failed",
+    }

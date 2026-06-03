@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.main import AppServices, build_parser, run_command
-from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice
+from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice, Order
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
 from live.state import AccountBalance
 from storage.live_repository import LiveStateRepository
@@ -1613,6 +1613,70 @@ def test_run_live_order_check_rejects_missing_instrument_spec_before_gateway_rec
 
     assert "live_order_check status=policy_rejected" in output
     assert "reason=instrument_spec_missing" in output
+    assert "gate=not_checked" in output
+    assert "trading_allowed=false" in output
+
+
+def test_run_live_order_check_rejects_duplicate_active_client_order_id() -> None:
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    store = live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    _add_usdt_balance(store)
+    store.upsert_order(
+        Order(
+            account_id="okx_sub_main",
+            bot_id="okx_perp_bot_main",
+            strategy_id="manual_live_check",
+            symbol="BTC-USDT-SWAP",
+            run_id="live-check",
+            order_id="okx-duplicate",
+            client_order_id="check-duplicate",
+            side="buy",
+            order_type="market",
+            size=Decimal("0.1"),
+            status="submitted",
+        )
+    )
+    live_repo.save_snapshot(account_id="okx_sub_main", store=store)
+    instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    instrument_repo.upsert_many(
+        [
+            Instrument(
+                symbol="BTC-USDT-SWAP",
+                inst_type="SWAP",
+                tick_size=Decimal("0.1"),
+                lot_size=Decimal("0.01"),
+                min_size=Decimal("0.01"),
+                state="live",
+            )
+        ]
+    )
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        instrument_repository=instrument_repo,
+        live_state_repository=live_repo,
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+    args = build_parser().parse_args(
+        [
+            "live-order-check",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.1",
+            "--client-order-id",
+            "check-duplicate",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_order_check status=local_state_rejected" in output
+    assert "reason=duplicate_client_order_id" in output
     assert "gate=not_checked" in output
     assert "trading_allowed=false" in output
 
