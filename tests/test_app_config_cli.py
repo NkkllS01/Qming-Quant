@@ -11,6 +11,11 @@ from storage.live_repository import LiveStateRepository
 from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
 from storage.safety_repository import SafetyRepository
 from storage.trade_repository import TradeRepository
+from tests.fakes import (
+    FakeWebSocketConnector,
+    FakeWebSocketSession,
+    live_store_with_position_and_order,
+)
 
 
 def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
@@ -1180,7 +1185,7 @@ def test_run_live_reconcile_command_reports_clean_snapshot() -> None:
     gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.1"}]
     gateway.rest_orders = [{"ordId": "okx-1"}]
     live_repo = LiveStateRepository("sqlite:///:memory:")
-    live_store = _live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    live_store = live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
     live_repo.save_snapshot(account_id="okx_sub_main", store=live_store)
     services = AppServices(
         gateway=gateway,
@@ -1202,7 +1207,7 @@ def test_run_live_reconcile_command_blocks_on_snapshot_mismatch() -> None:
     gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "short", "pos": "-0.2"}]
     gateway.rest_orders = [{"ordId": "exchange-only"}]
     live_repo = LiveStateRepository("sqlite:///:memory:")
-    live_store = _live_store_with_position_and_order(order_id="local-only", direction="long", size="0.1")
+    live_store = live_store_with_position_and_order(order_id="local-only", direction="long", size="0.1")
     live_repo.save_snapshot(account_id="okx_sub_main", store=live_store)
     services = AppServices(
         gateway=gateway,
@@ -1249,7 +1254,7 @@ def test_run_trading_gate_command_allows_clean_state() -> None:
     live_repo = LiveStateRepository("sqlite:///:memory:")
     live_repo.save_snapshot(
         account_id="okx_sub_main",
-        store=_live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1"),
+        store=live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1"),
     )
     gateway.rest_orders = [{"ordId": "okx-1"}]
     services = AppServices(
@@ -1290,7 +1295,7 @@ def test_run_trading_gate_command_blocks_on_reconciliation_mismatch() -> None:
     live_repo = LiveStateRepository("sqlite:///:memory:")
     live_repo.save_snapshot(
         account_id="okx_sub_main",
-        store=_live_store_with_position_and_order(order_id="local-only", direction="long", size="0.1"),
+        store=live_store_with_position_and_order(order_id="local-only", direction="long", size="0.1"),
     )
     gateway.rest_orders = [{"ordId": "exchange-only"}]
     services = AppServices(
@@ -1309,69 +1314,3 @@ def test_run_trading_gate_command_blocks_on_reconciliation_mismatch() -> None:
     assert "missing_orders_locally=1" in output
     assert "trading_allowed=false" in output
 
-
-class FakeWebSocketSession:
-    def __init__(self, messages: list[dict]) -> None:
-        self.messages = list(messages)
-        self.sent: list[dict] = []
-        self.closed = False
-
-    async def send_json(self, message: dict) -> None:
-        self.sent.append(message)
-
-    async def receive_json(self) -> dict:
-        if not self.messages:
-            raise ConnectionError("no messages")
-        return self.messages.pop(0)
-
-    async def close(self) -> None:
-        self.closed = True
-
-
-class FakeWebSocketConnector:
-    def __init__(self, sessions: list[FakeWebSocketSession]) -> None:
-        self.sessions = list(sessions)
-        self.urls: list[str] = []
-
-    async def connect(self, url: str) -> FakeWebSocketSession:
-        self.urls.append(url)
-        if not self.sessions:
-            raise ConnectionError("no sessions")
-        return self.sessions.pop(0)
-
-
-def _live_store_with_position_and_order(*, order_id: str, direction: str, size: str):
-    from core.models import Order, Position
-    from live.state import LiveStateStore
-
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    store = LiveStateStore()
-    store.upsert_position(
-        Position(
-            account_id="okx_sub_main",
-            symbol="BTC-USDT-SWAP",
-            direction=direction,
-            size=Decimal(size),
-            entry_price=Decimal("70000"),
-            mark_price=Decimal("70100"),
-            updated_at=timestamp,
-        )
-    )
-    store.upsert_order(
-        Order(
-            account_id="okx_sub_main",
-            bot_id="live_sync",
-            strategy_id="exchange_sync",
-            symbol="BTC-USDT-SWAP",
-            run_id="live",
-            order_id=order_id,
-            client_order_id=order_id,
-            side="buy",
-            order_type="limit",
-            size=Decimal("0.1"),
-            status="live",
-            created_at=timestamp,
-            updated_at=timestamp,
-        )
-    )
-    return store

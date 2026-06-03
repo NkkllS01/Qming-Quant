@@ -20,6 +20,13 @@ from exchanges.okx.websocket import (
     WebsocketsConnector,
     WebsocketsSession,
 )
+from tests.fakes import (
+    FakeHttpResponse,
+    FakeRawWebSocket,
+    FakeWebSocketConnector,
+    FakeWebSocketSender,
+    FakeWebSocketSession,
+)
 
 
 def test_sign_okx_request_matches_hmac_sha256_base64() -> None:
@@ -457,76 +464,6 @@ class FakeTradeRest:
 class StaticTimestampRestClient(OKXRestClient):
     def _timestamp(self) -> str:
         return "2024-01-01T00:00:00.000Z"
-
-
-class FakeHttpResponse:
-    def __init__(self, payload: dict) -> None:
-        self.payload = payload
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> dict:
-        return self.payload
-
-
-class FakeWebSocketSender:
-    def __init__(self) -> None:
-        self.messages: list[dict] = []
-
-    async def send_json(self, message: dict) -> None:
-        self.messages.append(message)
-
-
-class FakeWebSocketSession:
-    def __init__(self, messages: list[dict], *, fail_on_receive: bool = False) -> None:
-        self.messages = list(messages)
-        self.fail_on_receive = fail_on_receive
-        self.sent: list[dict] = []
-        self.closed = False
-
-    async def send_json(self, message: dict) -> None:
-        self.sent.append(message)
-
-    async def receive_json(self) -> dict:
-        if self.fail_on_receive:
-            raise ConnectionError("disconnected")
-        if not self.messages:
-            raise ConnectionError("no more messages")
-        return self.messages.pop(0)
-
-    async def close(self) -> None:
-        self.closed = True
-
-
-class FakeWebSocketConnector:
-    def __init__(self, sessions: list[FakeWebSocketSession]) -> None:
-        self.sessions = list(sessions)
-        self.urls: list[str] = []
-
-    async def connect(self, url: str) -> FakeWebSocketSession:
-        self.urls.append(url)
-        if not self.sessions:
-            raise ConnectionError("no session available")
-        return self.sessions.pop(0)
-
-
-class FakeRawWebSocket:
-    def __init__(self, messages: list[str | bytes]) -> None:
-        self.messages = list(messages)
-        self.sent: list[str] = []
-        self.closed = False
-
-    async def send(self, message: str) -> None:
-        self.sent.append(message)
-
-    async def recv(self) -> str | bytes:
-        if not self.messages:
-            raise ConnectionError("no more raw messages")
-        return self.messages.pop(0)
-
-    async def close(self) -> None:
-        self.closed = True
 
 
 def _okx_candle_row(timestamp: datetime, close: str) -> list[str]:
