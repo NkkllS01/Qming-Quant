@@ -61,6 +61,18 @@ class FundingRate(BaseModel):
     realized_rate: Decimal | None = None
 
 
+class MarkPrice(BaseModel):
+    symbol: str
+    mark_price: Decimal
+    updated_at: datetime
+
+
+class IndexPrice(BaseModel):
+    index_id: str
+    index_price: Decimal
+    updated_at: datetime
+
+
 class Candle(BaseModel):
     symbol: str
     timeframe: str

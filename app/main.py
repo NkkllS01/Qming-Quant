@@ -23,7 +23,13 @@ from market_data.candle_sync import CandleSyncService
 from market_data.candles import find_missing_ranges
 from paper.engine import PaperTradingEngine
 from storage.live_repository import LiveStateRepository
-from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
+from storage.repositories import (
+    CandleRepository,
+    FundingRateRepository,
+    IndexPriceRepository,
+    InstrumentRepository,
+    MarkPriceRepository,
+)
 from storage.safety_repository import SafetyRepository
 from storage.trade_repository import TradeRepository
 from strategies.examples.trend import MultiTimeframeTrendStrategy
@@ -35,6 +41,8 @@ class AppServices:
     candle_repository: CandleRepository
     instrument_repository: InstrumentRepository | None = None
     funding_rate_repository: FundingRateRepository | None = None
+    mark_price_repository: MarkPriceRepository | None = None
+    index_price_repository: IndexPriceRepository | None = None
     trade_repository: TradeRepository | None = None
     websocket_connector: object | None = None
     live_state_repository: LiveStateRepository | None = None
@@ -109,6 +117,14 @@ def build_parser() -> argparse.ArgumentParser:
     sync_funding.add_argument("--before", default=None)
     sync_funding.add_argument("--after", default=None)
     sync_funding.add_argument("--limit", type=int, default=100)
+
+    sync_mark = subparsers.add_parser("sync-mark-prices", help="Sync OKX mark price snapshots locally")
+    sync_mark.add_argument("--inst-type", default="SWAP")
+    sync_mark.add_argument("--symbol", default=None)
+
+    sync_index = subparsers.add_parser("sync-index-prices", help="Sync OKX index price snapshots locally")
+    sync_index.add_argument("--quote-currency", default=None)
+    sync_index.add_argument("--index-id", default=None)
 
     sync = subparsers.add_parser("sync-candles", help="Sync historical candles")
     sync.add_argument("--symbol", required=True)
@@ -216,6 +232,8 @@ def build_services(settings: Settings | None = None) -> AppServices:
         candle_repository=CandleRepository(settings.database_url),
         instrument_repository=InstrumentRepository(settings.database_url),
         funding_rate_repository=FundingRateRepository(settings.database_url),
+        mark_price_repository=MarkPriceRepository(settings.database_url),
+        index_price_repository=IndexPriceRepository(settings.database_url),
         trade_repository=TradeRepository(settings.database_url),
         websocket_connector=WebsocketsConnector(),
         live_state_repository=LiveStateRepository(settings.database_url),
@@ -285,6 +303,18 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         if services.funding_rate_repository is not None:
             services.funding_rate_repository.upsert_many(rates)
         return f"synced {len(rates)} funding rates for {args.symbol}"
+    if args.command == "sync-mark-prices":
+        prices = services.gateway.mark_prices(args.inst_type, symbol=args.symbol)
+        if services.mark_price_repository is not None:
+            services.mark_price_repository.upsert_many(prices)
+        scope = args.symbol if args.symbol is not None else args.inst_type
+        return f"synced {len(prices)} mark prices for {scope}"
+    if args.command == "sync-index-prices":
+        prices = services.gateway.index_tickers(quote_currency=args.quote_currency, index_id=args.index_id)
+        if services.index_price_repository is not None:
+            services.index_price_repository.upsert_many(prices)
+        scope = args.index_id or args.quote_currency or "all"
+        return f"synced {len(prices)} index prices for {scope}"
     if args.command == "backtest":
         candles = _list_command_candles(services, args.symbol, args.timeframe, args.start, args.end)
         gate = _evaluate_candle_data_gate(

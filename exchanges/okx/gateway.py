@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from core.models import Candle, FundingRate, Instrument, OrderIntent
-from exchanges.okx.mapper import map_funding_rate, map_instrument, map_okx_candles
+from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice, OrderIntent
+from exchanges.okx.mapper import map_funding_rate, map_index_price, map_instrument, map_mark_price, map_okx_candles
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient
 
@@ -50,6 +50,22 @@ class OKXGateway:
             params["after"] = after
         payload = self.rest.get("/api/v5/public/funding-rate-history", params)
         return [map_funding_rate(row) for row in payload.get("data", [])]
+
+    def mark_prices(self, inst_type: str = "SWAP", *, symbol: str | None = None) -> list[MarkPrice]:
+        params = {"instType": inst_type}
+        if symbol is not None:
+            params["instId"] = symbol
+        payload = self.rest.get("/api/v5/public/mark-price", params)
+        return [map_mark_price(row) for row in payload.get("data", [])]
+
+    def index_tickers(self, *, quote_currency: str | None = None, index_id: str | None = None) -> list[IndexPrice]:
+        params: dict[str, str] = {}
+        if quote_currency is not None:
+            params["quoteCcy"] = quote_currency
+        if index_id is not None:
+            params["instId"] = index_id
+        payload = self.rest.get("/api/v5/market/index-tickers", params)
+        return [map_index_price(row) for row in payload.get("data", [])]
 
     def history_candles(
         self,

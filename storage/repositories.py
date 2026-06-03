@@ -7,7 +7,7 @@ from sqlalchemy import Boolean, Column, DateTime, Integer, MetaData, Numeric, St
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 
-from core.models import Candle, CandleSyncState, FundingRate, Instrument
+from core.models import Candle, CandleSyncState, FundingRate, IndexPrice, Instrument, MarkPrice
 from market_data.candles import find_missing_ranges
 
 
@@ -300,6 +300,102 @@ class FundingRateRepository:
         return [_funding_rate_from_row(row) for row in rows]
 
 
+class MarkPriceRepository:
+    def __init__(self, database_url: str) -> None:
+        self.engine: Engine = create_engine(database_url)
+        self.metadata = MetaData()
+        self.mark_prices = Table(
+            "mark_prices",
+            self.metadata,
+            Column("symbol", String, primary_key=True),
+            Column("mark_price", String, nullable=False),
+            Column("updated_at", DateTime(timezone=True), nullable=False),
+        )
+        self.metadata.create_all(self.engine)
+
+    def upsert_many(self, prices: list[MarkPrice]) -> None:
+        if not prices:
+            return
+        rows = [
+            {
+                "symbol": price.symbol,
+                "mark_price": str(price.mark_price),
+                "updated_at": price.updated_at,
+            }
+            for price in prices
+        ]
+        stmt = sqlite_insert(self.mark_prices).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["symbol"],
+            set_={
+                "mark_price": stmt.excluded.mark_price,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        with self.engine.begin() as conn:
+            conn.execute(stmt)
+
+    def list_prices(self) -> list[MarkPrice]:
+        stmt = select(self.mark_prices).order_by(self.mark_prices.c.symbol)
+        with self.engine.begin() as conn:
+            rows = conn.execute(stmt).mappings().all()
+        return [_mark_price_from_row(row) for row in rows]
+
+    def get(self, symbol: str) -> MarkPrice | None:
+        stmt = select(self.mark_prices).where(self.mark_prices.c.symbol == symbol)
+        with self.engine.begin() as conn:
+            row = conn.execute(stmt).mappings().first()
+        return _mark_price_from_row(row) if row is not None else None
+
+
+class IndexPriceRepository:
+    def __init__(self, database_url: str) -> None:
+        self.engine: Engine = create_engine(database_url)
+        self.metadata = MetaData()
+        self.index_prices = Table(
+            "index_prices",
+            self.metadata,
+            Column("index_id", String, primary_key=True),
+            Column("index_price", String, nullable=False),
+            Column("updated_at", DateTime(timezone=True), nullable=False),
+        )
+        self.metadata.create_all(self.engine)
+
+    def upsert_many(self, prices: list[IndexPrice]) -> None:
+        if not prices:
+            return
+        rows = [
+            {
+                "index_id": price.index_id,
+                "index_price": str(price.index_price),
+                "updated_at": price.updated_at,
+            }
+            for price in prices
+        ]
+        stmt = sqlite_insert(self.index_prices).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["index_id"],
+            set_={
+                "index_price": stmt.excluded.index_price,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        with self.engine.begin() as conn:
+            conn.execute(stmt)
+
+    def list_prices(self) -> list[IndexPrice]:
+        stmt = select(self.index_prices).order_by(self.index_prices.c.index_id)
+        with self.engine.begin() as conn:
+            rows = conn.execute(stmt).mappings().all()
+        return [_index_price_from_row(row) for row in rows]
+
+    def get(self, index_id: str) -> IndexPrice | None:
+        stmt = select(self.index_prices).where(self.index_prices.c.index_id == index_id)
+        with self.engine.begin() as conn:
+            row = conn.execute(stmt).mappings().first()
+        return _index_price_from_row(row) if row is not None else None
+
+
 def _ensure_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -341,4 +437,20 @@ def _funding_rate_from_row(row) -> FundingRate:
         funding_time=_ensure_utc(row["funding_time"]),
         funding_rate=Decimal(row["funding_rate"]),
         realized_rate=Decimal(row["realized_rate"]) if row["realized_rate"] is not None else None,
+    )
+
+
+def _mark_price_from_row(row) -> MarkPrice:
+    return MarkPrice(
+        symbol=row["symbol"],
+        mark_price=Decimal(row["mark_price"]),
+        updated_at=_ensure_utc(row["updated_at"]),
+    )
+
+
+def _index_price_from_row(row) -> IndexPrice:
+    return IndexPrice(
+        index_id=row["index_id"],
+        index_price=Decimal(row["index_price"]),
+        updated_at=_ensure_utc(row["updated_at"]),
     )

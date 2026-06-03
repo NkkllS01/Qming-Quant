@@ -1,10 +1,16 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from core.models import Candle, FundingRate, Instrument
+from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice
 from market_data.candle_sync import CandleSyncService
 from market_data.candles import aggregate_candles, find_missing_ranges
-from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
+from storage.repositories import (
+    CandleRepository,
+    FundingRateRepository,
+    IndexPriceRepository,
+    InstrumentRepository,
+    MarkPriceRepository,
+)
 
 
 def _candle(ts: datetime, close: str, timeframe: str = "1m") -> Candle:
@@ -173,6 +179,56 @@ def test_funding_rate_repository_upserts_and_reads_by_time_range() -> None:
     assert len(rows) == 1
     assert rows[0].funding_rate == Decimal("0.0003")
     assert rows[0].realized_rate == Decimal("0.00025")
+
+
+def test_mark_price_repository_upserts_and_reads_latest_snapshot() -> None:
+    repo = MarkPriceRepository("sqlite:///:memory:")
+    first = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    second = first + timedelta(seconds=1)
+    repo.upsert_many(
+        [
+            MarkPrice(symbol="BTC-USDT-SWAP", mark_price=Decimal("70000.1"), updated_at=first),
+            MarkPrice(symbol="ETH-USDT-SWAP", mark_price=Decimal("3000.2"), updated_at=first),
+        ]
+    )
+    repo.upsert_many(
+        [
+            MarkPrice(symbol="BTC-USDT-SWAP", mark_price=Decimal("70001.3"), updated_at=second),
+        ]
+    )
+
+    btc = repo.get("BTC-USDT-SWAP")
+    rows = repo.list_prices()
+
+    assert btc is not None
+    assert btc.mark_price == Decimal("70001.3")
+    assert btc.updated_at == second
+    assert [row.symbol for row in rows] == ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+
+
+def test_index_price_repository_upserts_and_reads_latest_snapshot() -> None:
+    repo = IndexPriceRepository("sqlite:///:memory:")
+    first = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    second = first + timedelta(seconds=1)
+    repo.upsert_many(
+        [
+            IndexPrice(index_id="BTC-USDT", index_price=Decimal("69990.1"), updated_at=first),
+            IndexPrice(index_id="ETH-USDT", index_price=Decimal("2995.2"), updated_at=first),
+        ]
+    )
+    repo.upsert_many(
+        [
+            IndexPrice(index_id="BTC-USDT", index_price=Decimal("69991.3"), updated_at=second),
+        ]
+    )
+
+    btc = repo.get("BTC-USDT")
+    rows = repo.list_prices()
+
+    assert btc is not None
+    assert btc.index_price == Decimal("69991.3")
+    assert btc.updated_at == second
+    assert [row.index_id for row in rows] == ["BTC-USDT", "ETH-USDT"]
 
 
 def test_candle_sync_repairs_missing_ranges_with_fetcher() -> None:

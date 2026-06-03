@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from core.models import Candle, FundingRate, Instrument, utc_from_ms
+from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice, utc_from_ms
 
 
 def map_okx_candles(
@@ -39,4 +39,20 @@ def map_funding_rate(row: dict) -> FundingRate:
         funding_time=utc_from_ms(row["fundingTime"]),
         funding_rate=Decimal(row["fundingRate"]),
         realized_rate=Decimal(row["realizedRate"]) if row.get("realizedRate") else None,
+    )
+
+
+def map_mark_price(row: dict) -> MarkPrice:
+    return MarkPrice(
+        symbol=row["instId"],
+        mark_price=Decimal(row["markPx"]),
+        updated_at=utc_from_ms(row["ts"]),
+    )
+
+
+def map_index_price(row: dict) -> IndexPrice:
+    return IndexPrice(
+        index_id=row["instId"],
+        index_price=Decimal(row["idxPx"]),
+        updated_at=utc_from_ms(row["ts"]),
     )

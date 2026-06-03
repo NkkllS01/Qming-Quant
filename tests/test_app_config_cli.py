@@ -5,11 +5,17 @@ from pathlib import Path
 
 from app.config import Settings
 from app.main import AppServices, build_parser, run_command
-from core.models import Candle, FundingRate, Instrument
+from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
 from live.state import AccountBalance
 from storage.live_repository import LiveStateRepository
-from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
+from storage.repositories import (
+    CandleRepository,
+    FundingRateRepository,
+    IndexPriceRepository,
+    InstrumentRepository,
+    MarkPriceRepository,
+)
 from storage.safety_repository import SafetyRepository
 from storage.trade_repository import TradeRepository
 from tests.fakes import (
@@ -117,6 +123,8 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     sync_funding_args = parser.parse_args(
         ["sync-funding-rates", "--symbol", "BTC-USDT-SWAP", "--limit", "2"]
     )
+    sync_mark_args = parser.parse_args(["sync-mark-prices", "--symbol", "BTC-USDT-SWAP"])
+    sync_index_args = parser.parse_args(["sync-index-prices", "--quote-currency", "USDT"])
     live_sync_args = parser.parse_args(
         ["live-sync", "--symbol", "BTC-USDT-SWAP", "--max-messages", "1", "--public-only"]
     )
@@ -162,6 +170,11 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert sync_funding_args.command == "sync-funding-rates"
     assert sync_funding_args.symbol == "BTC-USDT-SWAP"
     assert sync_funding_args.limit == 2
+    assert sync_mark_args.command == "sync-mark-prices"
+    assert sync_mark_args.inst_type == "SWAP"
+    assert sync_mark_args.symbol == "BTC-USDT-SWAP"
+    assert sync_index_args.command == "sync-index-prices"
+    assert sync_index_args.quote_currency == "USDT"
     assert live_sync_args.command == "live-sync"
     assert live_sync_args.symbol == ["BTC-USDT-SWAP"]
     assert live_sync_args.max_messages == 1
@@ -251,6 +264,24 @@ class FakeGateway:
                 realized_rate=Decimal("0.00008"),
             )
             for i in range(limit)
+        ]
+
+    def mark_prices(self, inst_type: str = "SWAP", *, symbol: str | None = None):
+        return [
+            MarkPrice(
+                symbol=symbol or "BTC-USDT-SWAP",
+                mark_price=Decimal("70000.12"),
+                updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            )
+        ]
+
+    def index_tickers(self, *, quote_currency: str | None = None, index_id: str | None = None):
+        return [
+            IndexPrice(
+                index_id=index_id or f"BTC-{quote_currency or 'USDT'}",
+                index_price=Decimal("69990.12"),
+                updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            )
         ]
 
     def positions(self) -> dict:
@@ -395,6 +426,44 @@ def test_run_sync_funding_rates_command_persists_gateway_rates() -> None:
 
     assert "synced 2 funding rates" in output
     assert len(funding_repo.list_rates("BTC-USDT-SWAP")) == 2
+
+
+def test_run_sync_mark_prices_command_persists_gateway_prices() -> None:
+    gateway = FakeGateway()
+    candle_repo = CandleRepository("sqlite:///:memory:")
+    mark_repo = MarkPriceRepository("sqlite:///:memory:")
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=candle_repo,
+        mark_price_repository=mark_repo,
+    )
+    args = build_parser().parse_args(["sync-mark-prices", "--symbol", "BTC-USDT-SWAP"])
+
+    output = run_command(args, services)
+
+    assert "synced 1 mark prices for BTC-USDT-SWAP" in output
+    price = mark_repo.get("BTC-USDT-SWAP")
+    assert price is not None
+    assert price.mark_price == Decimal("70000.12")
+
+
+def test_run_sync_index_prices_command_persists_gateway_prices() -> None:
+    gateway = FakeGateway()
+    candle_repo = CandleRepository("sqlite:///:memory:")
+    index_repo = IndexPriceRepository("sqlite:///:memory:")
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=candle_repo,
+        index_price_repository=index_repo,
+    )
+    args = build_parser().parse_args(["sync-index-prices", "--quote-currency", "USDT"])
+
+    output = run_command(args, services)
+
+    assert "synced 1 index prices for USDT" in output
+    price = index_repo.get("BTC-USDT")
+    assert price is not None
+    assert price.index_price == Decimal("69990.12")
 
 
 def test_run_backtest_command_reads_repository_and_returns_metrics() -> None:

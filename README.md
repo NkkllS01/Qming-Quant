@@ -93,6 +93,18 @@ Sync funding-rate history into the local database:
 python -m app.main sync-funding-rates --symbol BTC-USDT-SWAP --limit 100
 ```
 
+Sync current mark-price snapshots into the local database:
+
+```powershell
+python -m app.main sync-mark-prices --symbol BTC-USDT-SWAP
+```
+
+Sync current index-price snapshots into the local database:
+
+```powershell
+python -m app.main sync-index-prices --quote-currency USDT
+```
+
 Check local candle coverage and gap status:
 
 ```powershell
@@ -257,6 +269,7 @@ The current local storage layer supports:
 - Candle upsert and sync-state tracking
 - Local instrument specs with exact Decimal values stored as text to avoid SQLite precision noise
 - Funding-rate history upsert and time-window reads for contract strategy research
+- Mark-price and index-price snapshot upsert for contract risk and monitoring research
 - Live ticker, balance, position, order, and fill snapshots for restart recovery research
 
 ## Development Order

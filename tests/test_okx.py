@@ -9,7 +9,7 @@ import httpx
 
 from core.models import OrderIntent
 from exchanges.okx.gateway import OKXGateway
-from exchanges.okx.mapper import map_funding_rate, map_instrument, map_okx_candles
+from exchanges.okx.mapper import map_funding_rate, map_index_price, map_instrument, map_mark_price, map_okx_candles
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.signer import sign_okx_request
 from exchanges.okx.websocket import (
@@ -96,6 +96,34 @@ def test_map_funding_rate_history_row_to_model() -> None:
     assert funding_rate.funding_time.year == 2024
 
 
+def test_map_mark_price_row_to_model() -> None:
+    mark_price = map_mark_price(
+        {
+            "instId": "BTC-USDT-SWAP",
+            "markPx": "70000.12",
+            "ts": "1717200000000",
+        }
+    )
+
+    assert mark_price.symbol == "BTC-USDT-SWAP"
+    assert mark_price.mark_price == Decimal("70000.12")
+    assert mark_price.updated_at.year == 2024
+
+
+def test_map_index_price_row_to_model() -> None:
+    index_price = map_index_price(
+        {
+            "instId": "BTC-USDT",
+            "idxPx": "69990.12",
+            "ts": "1717200000000",
+        }
+    )
+
+    assert index_price.index_id == "BTC-USDT"
+    assert index_price.index_price == Decimal("69990.12")
+    assert index_price.updated_at.year == 2024
+
+
 def test_okx_gateway_history_candles_range_paginates_until_start_is_covered() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     rows_by_after = {
@@ -127,6 +155,40 @@ def test_okx_gateway_history_candles_range_paginates_until_start_is_covered() ->
     assert [call["after"] for call in rest.calls] == [
         str(int((start + timedelta(minutes=5)).timestamp() * 1000)),
         str(int((start + timedelta(minutes=3)).timestamp() * 1000)),
+    ]
+
+
+def test_okx_gateway_reads_mark_prices_with_optional_symbol() -> None:
+    rest = FakeMarketPriceRest()
+    gateway = OKXGateway(rest)
+
+    prices = gateway.mark_prices("SWAP", symbol="BTC-USDT-SWAP")
+
+    assert prices[0].symbol == "BTC-USDT-SWAP"
+    assert prices[0].mark_price == Decimal("70000.12")
+    assert rest.gets == [
+        {
+            "path": "/api/v5/public/mark-price",
+            "params": {"instType": "SWAP", "instId": "BTC-USDT-SWAP"},
+            "private": False,
+        }
+    ]
+
+
+def test_okx_gateway_reads_index_tickers_with_quote_currency() -> None:
+    rest = FakeMarketPriceRest()
+    gateway = OKXGateway(rest)
+
+    prices = gateway.index_tickers(quote_currency="USDT")
+
+    assert prices[0].index_id == "BTC-USDT"
+    assert prices[0].index_price == Decimal("69990.12")
+    assert rest.gets == [
+        {
+            "path": "/api/v5/market/index-tickers",
+            "params": {"quoteCcy": "USDT"},
+            "private": False,
+        }
     ]
 
 
@@ -459,6 +521,35 @@ class FakeTradeRest:
     def post(self, path: str, body: dict, *, private: bool = False) -> dict:
         self.posts.append({"path": path, "body": body, "private": private})
         return {"data": [{"ordId": "okx-1"}]}
+
+
+class FakeMarketPriceRest:
+    def __init__(self) -> None:
+        self.gets: list[dict] = []
+
+    def get(self, path: str, params: dict | None = None, *, private: bool = False) -> dict:
+        self.gets.append({"path": path, "params": params, "private": private})
+        if path == "/api/v5/public/mark-price":
+            return {
+                "data": [
+                    {
+                        "instId": "BTC-USDT-SWAP",
+                        "markPx": "70000.12",
+                        "ts": "1717200000000",
+                    }
+                ]
+            }
+        if path == "/api/v5/market/index-tickers":
+            return {
+                "data": [
+                    {
+                        "instId": "BTC-USDT",
+                        "idxPx": "69990.12",
+                        "ts": "1717200000000",
+                    }
+                ]
+            }
+        return {"data": []}
 
 
 class StaticTimestampRestClient(OKXRestClient):
