@@ -7,6 +7,7 @@ from app.config import Settings
 from app.main import AppServices, build_parser, run_command
 from core.models import Candle, FundingRate, Instrument
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
+from storage.live_repository import LiveStateRepository
 from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
 from storage.trade_repository import TradeRepository
 
@@ -1045,6 +1046,7 @@ def test_run_paper_run_command_remains_compatible() -> None:
 
 
 def test_run_live_sync_command_updates_public_and_private_state_summary() -> None:
+    live_repo = LiveStateRepository("sqlite:///:memory:")
     connector = FakeWebSocketConnector(
         [
             FakeWebSocketSession(
@@ -1086,6 +1088,7 @@ def test_run_live_sync_command_updates_public_and_private_state_summary() -> Non
         gateway=FakeGateway(),
         candle_repository=CandleRepository("sqlite:///:memory:"),
         websocket_connector=connector,
+        live_state_repository=live_repo,
     )
     args = build_parser().parse_args(
         ["live-sync", "--symbol", "BTC-USDT-SWAP", "--max-messages", "1"]
@@ -1099,7 +1102,11 @@ def test_run_live_sync_command_updates_public_and_private_state_summary() -> Non
     assert "private_messages=1" in output
     assert "tickers=1" in output
     assert "balances=1" in output
+    assert "persisted=true" in output
     assert "trading_enabled=false" in output
+    restored = live_repo.load_snapshot(account_id="okx_sub_main")
+    assert restored.tickers["BTC-USDT-SWAP"].last_price == Decimal("70000")
+    assert restored.balances["USDT"].equity == Decimal("1000")
     assert connector.urls == [
         "wss://ws.okx.com:8443/ws/v5/public",
         "wss://ws.okx.com:8443/ws/v5/private",
@@ -1139,6 +1146,7 @@ def test_run_live_sync_command_public_only_skips_private_connection() -> None:
     assert "live_sync mode=public" in output
     assert "public_messages=1" in output
     assert "private_messages=0" in output
+    assert "persisted=false" in output
     assert len(connector.urls) == 1
 
 

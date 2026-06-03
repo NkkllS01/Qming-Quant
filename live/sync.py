@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.websocket import OKXWebSocketRuntime, WebSocketConnector
 from live.state import LiveStateStore, OKXLiveStateHandler
+from storage.live_repository import LiveStateRepository
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class LiveSyncResult:
     balances_count: int
     positions_count: int
     orders_count: int
+    persisted: bool = False
     trading_enabled: bool = False
 
 
@@ -27,12 +29,14 @@ class LiveSyncService:
         account_id: str,
         symbols: list[str],
         store: LiveStateStore | None = None,
+        repository: LiveStateRepository | None = None,
     ) -> None:
         self.gateway = gateway
         self.connector = connector
         self.account_id = account_id
         self.symbols = symbols
         self.store = store or LiveStateStore()
+        self.repository = repository
         self.handler = OKXLiveStateHandler(self.store, account_id=account_id)
 
     async def run_once(
@@ -70,6 +74,11 @@ class LiveSyncService:
             )
             private_messages = await runtime.run_once(max_messages=max_messages_per_connection)
 
+        persisted = False
+        if self.repository is not None:
+            self.repository.save_snapshot(account_id=self.account_id, store=self.store)
+            persisted = True
+
         return LiveSyncResult(
             public_messages=public_messages,
             private_messages=private_messages,
@@ -77,6 +86,7 @@ class LiveSyncService:
             balances_count=len(self.store.balances),
             positions_count=len(self.store.positions),
             orders_count=len(self.store.orders),
+            persisted=persisted,
         )
 
 

@@ -148,7 +148,7 @@ Manually run read-only live state synchronization:
 python -m app.main live-sync --symbol BTC-USDT-SWAP --max-messages 1 --public-only
 ```
 
-`live-sync` wires the OKX WebSocket runtime, network adapter, and live state handler together. It can update local in-memory ticker, balance, position, and order state, but it does not place or cancel orders. Use `--public-only` for market-data smoke tests before running private account subscriptions.
+`live-sync` wires the OKX WebSocket runtime, network adapter, live state handler, and live state repository together. It can update and persist ticker, balance, position, and order snapshots, but it does not place or cancel orders. Use `--public-only` for market-data smoke tests before running private account subscriptions.
 
 The current backtest engine supports a single-position K-line lifecycle with:
 
@@ -219,6 +219,7 @@ The current local storage layer supports:
 - Candle upsert and sync-state tracking
 - Local instrument specs with exact Decimal values stored as text to avoid SQLite precision noise
 - Funding-rate history upsert and time-window reads for contract strategy research
+- Live ticker, balance, position, and order snapshots for restart recovery research
 
 ## Development Order
 

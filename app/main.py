@@ -18,6 +18,7 @@ from live.sync import LiveSyncService
 from market_data.candle_sync import CandleSyncService
 from market_data.candles import find_missing_ranges
 from paper.engine import PaperTradingEngine
+from storage.live_repository import LiveStateRepository
 from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
 from storage.trade_repository import TradeRepository
 from strategies.examples.trend import MultiTimeframeTrendStrategy
@@ -31,6 +32,7 @@ class AppServices:
     funding_rate_repository: FundingRateRepository | None = None
     trade_repository: TradeRepository | None = None
     websocket_connector: object | None = None
+    live_state_repository: LiveStateRepository | None = None
 
 
 @dataclass
@@ -181,6 +183,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         funding_rate_repository=FundingRateRepository(settings.database_url),
         trade_repository=TradeRepository(settings.database_url),
         websocket_connector=WebsocketsConnector(),
+        live_state_repository=LiveStateRepository(settings.database_url),
     )
 
 
@@ -410,6 +413,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             connector=connector,
             account_id=args.account_id,
             symbols=symbols,
+            repository=services.live_state_repository,
         )
         result = asyncio.run(
             service.run_once(
@@ -431,6 +435,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"balances={result.balances_count} "
             f"positions={result.positions_count} "
             f"orders={result.orders_count} "
+            f"persisted={str(result.persisted).lower()} "
             f"trading_enabled={str(result.trading_enabled).lower()}"
         )
     raise ValueError(f"Unsupported command: {args.command}")
