@@ -14,6 +14,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="phase1", description="OKX demo place/cancel CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    subparsers.add_parser("auth", help="Verify OKX demo private API auth")
+
     place = subparsers.add_parser("place", help="Place one OKX demo order")
     place.add_argument("--symbol", default="BTC-USDT-SWAP")
     place.add_argument("--side", choices=["buy", "sell"], required=True)
@@ -41,11 +43,19 @@ def build_gateway(settings: Settings) -> OKXGateway:
 
 
 def run_command(args: argparse.Namespace, gateway: OKXGateway) -> str:
+    if args.command == "auth":
+        return _auth_check(gateway)
     if args.command == "place":
         return _place_order(args, gateway)
     if args.command == "cancel":
         return _cancel_order(args, gateway)
     raise ValueError(f"unsupported command: {args.command}")
+
+
+def _auth_check(gateway: OKXGateway) -> str:
+    response = gateway.balance()
+    require_okx_success(response, "auth")
+    return "phase1_auth status=ok"
 
 
 def _place_order(args: argparse.Namespace, gateway: OKXGateway) -> str:
@@ -64,6 +74,7 @@ def _place_order(args: argparse.Namespace, gateway: OKXGateway) -> str:
         client_order_id=args.client_order_id or f"p1{uuid4().hex[:24]}",
     )
     response = gateway.place_order(intent, td_mode=args.td_mode)
+    require_okx_success(response, "place")
     order_id = _first_data_value(response, "ordId", "none")
     return f"phase1_place status=sent symbol={args.symbol} order_id={order_id} client_order_id={intent.client_order_id}"
 
@@ -76,6 +87,7 @@ def _cancel_order(args: argparse.Namespace, gateway: OKXGateway) -> str:
         order_id=args.order_id,
         client_order_id=args.client_order_id,
     )
+    require_okx_success(response, "cancel")
     order_id = _first_data_value(response, "ordId", args.order_id or "none")
     client_order_id = _first_data_value(response, "clOrdId", args.client_order_id or "none")
     return f"phase1_cancel status=sent symbol={args.symbol} order_id={order_id} client_order_id={client_order_id}"
@@ -96,6 +108,11 @@ def _parse_decimal(value: str) -> Decimal:
     if not parsed.is_finite() or parsed <= 0:
         raise ValueError("size must be a positive finite decimal")
     return parsed
+
+
+def require_okx_success(response: dict, action: str) -> None:
+    if response.get("code") != "0":
+        raise RuntimeError(f"OKX {action} failed: {response}")
 
 
 def _first_data_value(response: dict, key: str, default: str) -> str:

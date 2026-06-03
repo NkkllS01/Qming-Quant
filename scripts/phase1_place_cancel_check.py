@@ -8,7 +8,7 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import Settings
-from app.phase1_cli import build_gateway
+from app.phase1_cli import build_gateway, require_okx_success
 from core.models import OrderIntent
 
 
@@ -27,6 +27,8 @@ def _run_check() -> None:
     server_time = gateway.server_time()
     if not server_time.get("data"):
         raise RuntimeError("OKX server time response has no data")
+    auth_response = gateway.balance()
+    require_okx_success(auth_response, "auth")
 
     intent = OrderIntent(
         account_id="okx_demo",
@@ -43,8 +45,10 @@ def _run_check() -> None:
         client_order_id=f"p1{uuid4().hex[:24]}",
     )
     place_response = gateway.place_order(intent, td_mode="isolated")
+    require_okx_success(place_response, "place")
     order_id = _response_order_id(place_response)
-    gateway.cancel_order(symbol=intent.symbol, order_id=order_id)
+    cancel_response = gateway.cancel_order(symbol=intent.symbol, order_id=order_id)
+    require_okx_success(cancel_response, "cancel")
 
 
 def _response_order_id(response: dict) -> str:

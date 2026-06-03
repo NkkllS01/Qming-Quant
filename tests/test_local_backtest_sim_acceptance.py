@@ -7,7 +7,7 @@ from storage.repositories import CandleRepository, InstrumentRepository
 from storage.trade_repository import TradeRepository
 
 
-def test_phase1_local_data_to_backtest_and_sim_persistence_acceptance() -> None:
+def test_local_data_to_backtest_and_sim_persistence_acceptance() -> None:
     candle_repo = CandleRepository("sqlite:///:memory:")
     instrument_repo = InstrumentRepository("sqlite:///:memory:")
     trade_repo = TradeRepository("sqlite:///:memory:")

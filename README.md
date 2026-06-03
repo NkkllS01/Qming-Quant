@@ -39,7 +39,7 @@ python -m ruff check .
 Phase 1 acceptance smoke test:
 
 ```powershell
-python -m pytest tests/test_phase1_acceptance.py -q
+python -m pytest tests/test_phase1_cli.py -q
 ```
 
 Optional environment variables:
@@ -64,13 +64,14 @@ Public data commands do not require OKX credentials.
 Phase 1 OKX demo order CLI:
 
 ```powershell
+python -m app.phase1_cli auth
 python -m app.phase1_cli place --symbol BTC-USDT-SWAP --side buy --size 0.01 --client-order-id phase1-test
 python -m app.phase1_cli cancel --symbol BTC-USDT-SWAP --client-order-id phase1-test
 ```
 
 The Phase 1 CLI requires `OKX_SIMULATED_TRADING=1` and refuses to run without OKX credentials.
 
-Phase 1 place/cancel verification script:
+Phase 1 auth/place/cancel verification script:
 
 ```powershell
 python scripts/phase1_place_cancel_check.py
