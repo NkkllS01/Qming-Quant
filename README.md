@@ -2,7 +2,7 @@
 
 Independent personal OKX USDT perpetual contract quant trading system.
 
-Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, a trading safety gate, and gated live order execution/cancellation services. There is intentionally no live order CLI yet.
+Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, a trading safety gate, live fill persistence, and gated live order execution/cancellation services. There is intentionally no live order CLI yet.
 
 Design docs:
 
@@ -11,19 +11,19 @@ Design docs:
 
 ## Safety Boundary
 
-This project currently supports OKX market/account reads, local simulation/backtesting, live state persistence, reconciliation, emergency pause controls, and gated internal live order execution/cancellation services.
+This project currently supports OKX market/account reads, local simulation/backtesting, live state persistence for tickers, balances, positions, orders, and fills, reconciliation, emergency pause controls, and gated internal live order execution/cancellation services.
 
 The OKX integration is organized as an API Gateway:
 
 - REST API: historical candles, instruments, funding rates, account queries, position queries, pending-order queries, REST reconciliation, order placement, and order cancellation.
-- WebSocket API: public/private URL, private login message signing, subscribe/unsubscribe message construction, message dispatch, reconnect subscription replay, a `websockets` network adapter, and normalized live state handling for tickers, account balances, positions, and orders are implemented as tested foundations. An always-on live sync loop is intentionally not started yet.
+- WebSocket API: public/private URL, private login message signing, subscribe/unsubscribe message construction, message dispatch, reconnect subscription replay, a `websockets` network adapter, and normalized live state handling for tickers, account balances, positions, orders, and fills are implemented as tested foundations. An always-on live sync loop is intentionally not started yet.
 
 Still intentionally not exposed:
 
 - A CLI command for live order placement
 - An always-on live trading loop
 - A production scheduler/daemon
-- Full private fill-event lifecycle handling
+- Full private fill-event lifecycle reconciliation
 
 Do not expose live trading until data sync, backtesting, simulation, risk checks, reconciliation, small-size constraints, and operator emergency controls are reviewed together.
 
@@ -243,7 +243,7 @@ The current local storage layer supports:
 - Candle upsert and sync-state tracking
 - Local instrument specs with exact Decimal values stored as text to avoid SQLite precision noise
 - Funding-rate history upsert and time-window reads for contract strategy research
-- Live ticker, balance, position, and order snapshots for restart recovery research
+- Live ticker, balance, position, order, and fill snapshots for restart recovery research
 
 ## Development Order
 

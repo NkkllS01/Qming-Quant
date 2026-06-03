@@ -7,7 +7,7 @@ from sqlalchemy import Column, DateTime, MetaData, String, Table, create_engine,
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 
-from core.models import Order, Position
+from core.models import Fill, Order, Position
 from live.state import AccountBalance, LiveStateStore, LiveTicker
 
 
@@ -68,6 +68,22 @@ class LiveStateRepository:
             Column("created_at", DateTime(timezone=True), nullable=False),
             Column("updated_at", DateTime(timezone=True), nullable=False),
         )
+        self.fills = Table(
+            "live_fills",
+            self.metadata,
+            Column("account_id", String, primary_key=True),
+            Column("fill_id", String, primary_key=True),
+            Column("bot_id", String, nullable=False),
+            Column("strategy_id", String, nullable=False),
+            Column("symbol", String, nullable=False),
+            Column("run_id", String, nullable=False),
+            Column("client_order_id", String, nullable=False),
+            Column("side", String, nullable=False),
+            Column("size", String, nullable=False),
+            Column("price", String, nullable=False),
+            Column("fee", String, nullable=False),
+            Column("created_at", DateTime(timezone=True), nullable=False),
+        )
         self.metadata.create_all(self.engine)
 
     def save_snapshot(self, *, account_id: str, store: LiveStateStore) -> None:
@@ -96,6 +112,13 @@ class LiveStateRepository:
                     [_order_row(order) for order in store.orders.values()],
                     ["account_id", "order_id"],
                 )
+            if store.fills:
+                _upsert(
+                    conn,
+                    self.fills,
+                    [_fill_row(fill) for fill in store.fills.values()],
+                    ["account_id", "fill_id"],
+                )
 
     def load_snapshot(self, *, account_id: str) -> LiveStateStore:
         store = LiveStateStore()
@@ -108,6 +131,9 @@ class LiveStateRepository:
                 select(self.positions).where(self.positions.c.account_id == account_id)
             ).mappings().all()
             order_rows = conn.execute(select(self.orders).where(self.orders.c.account_id == account_id)).mappings().all()
+            fill_rows = conn.execute(
+                select(self.fills).where(self.fills.c.account_id == account_id).order_by(self.fills.c.created_at)
+            ).mappings().all()
         for row in ticker_rows:
             store.upsert_ticker(_ticker_from_row(row))
         for row in balance_rows:
@@ -116,6 +142,8 @@ class LiveStateRepository:
             store.upsert_position(_position_from_row(row))
         for row in order_rows:
             store.upsert_order(_order_from_row(row))
+        for row in fill_rows:
+            store.upsert_fill(_fill_from_row(row))
         return store
 
 
@@ -187,6 +215,23 @@ def _order_row(order: Order) -> dict:
     }
 
 
+def _fill_row(fill: Fill) -> dict:
+    return {
+        "account_id": fill.account_id,
+        "fill_id": fill.fill_id,
+        "bot_id": fill.bot_id,
+        "strategy_id": fill.strategy_id,
+        "symbol": fill.symbol,
+        "run_id": fill.run_id,
+        "client_order_id": fill.client_order_id,
+        "side": fill.side,
+        "size": str(fill.size),
+        "price": str(fill.price),
+        "fee": str(fill.fee),
+        "created_at": fill.created_at,
+    }
+
+
 def _ticker_from_row(row) -> LiveTicker:
     return LiveTicker(
         symbol=row["symbol"],
@@ -240,6 +285,23 @@ def _order_from_row(row) -> Order:
         okx_order_id=row["okx_order_id"],
         created_at=_ensure_utc(row["created_at"]),
         updated_at=_ensure_utc(row["updated_at"]),
+    )
+
+
+def _fill_from_row(row) -> Fill:
+    return Fill(
+        account_id=row["account_id"],
+        bot_id=row["bot_id"],
+        strategy_id=row["strategy_id"],
+        symbol=row["symbol"],
+        run_id=row["run_id"],
+        fill_id=row["fill_id"],
+        client_order_id=row["client_order_id"],
+        side=row["side"],
+        size=Decimal(row["size"]),
+        price=Decimal(row["price"]),
+        fee=Decimal(row["fee"]),
+        created_at=_ensure_utc(row["created_at"]),
     )
 
 

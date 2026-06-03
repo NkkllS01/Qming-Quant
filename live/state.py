@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from core.models import Order, Position, utc_from_ms
+from core.models import Fill, Order, Position, utc_from_ms
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class LiveStateStore:
         self.balances: dict[str, AccountBalance] = {}
         self.positions: dict[str, Position] = {}
         self.orders: dict[str, Order] = {}
+        self.fills: dict[str, Fill] = {}
         self.last_event_at: datetime | None = None
 
     def upsert_ticker(self, ticker: LiveTicker) -> None:
@@ -51,12 +52,17 @@ class LiveStateStore:
         self.orders[order.order_id] = order
         self.last_event_at = order.updated_at
 
+    def upsert_fill(self, fill: Fill) -> None:
+        self.fills[fill.fill_id] = fill
+        self.last_event_at = fill.created_at
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "tickers": dict(self.tickers),
             "balances": dict(self.balances),
             "positions": dict(self.positions),
             "orders": dict(self.orders),
+            "fills": dict(self.fills),
             "last_event_at": self.last_event_at,
         }
 
@@ -169,6 +175,17 @@ class OKXLiveStateHandler:
                     updated_at=updated_at,
                 )
             )
+            fill = _fill_from_order_row(
+                row,
+                account_id=self.account_id,
+                bot_id=self.bot_id,
+                strategy_id=self.strategy_id,
+                run_id=self.run_id,
+                symbol=symbol,
+                order_id=order_id,
+            )
+            if fill is not None:
+                self.store.upsert_fill(fill)
 
 
 def _timestamp_from_row(row: dict[str, Any], key: str = "uTime") -> datetime:
@@ -188,6 +205,45 @@ def _optional_decimal(value: Any) -> Decimal | None:
     if value in {None, ""}:
         return None
     return Decimal(str(value))
+
+
+def _fill_from_order_row(
+    row: dict[str, Any],
+    *,
+    account_id: str,
+    bot_id: str,
+    strategy_id: str,
+    run_id: str,
+    symbol: str,
+    order_id: str,
+) -> Fill | None:
+    fill_size = _decimal_or_zero(row.get("fillSz"))
+    fill_price = _decimal_or_zero(row.get("fillPx"))
+    if fill_size == Decimal("0") or fill_price == Decimal("0"):
+        return None
+    created_at = _timestamp_from_row(row, "fillTime")
+    return Fill(
+        account_id=account_id,
+        bot_id=bot_id,
+        strategy_id=strategy_id,
+        symbol=symbol,
+        run_id=run_id,
+        fill_id=_fill_id(row, order_id=order_id, created_at=created_at, fill_size=fill_size),
+        client_order_id=row.get("clOrdId") or order_id,
+        side=row.get("side") or "unknown",
+        size=fill_size,
+        price=fill_price,
+        fee=_decimal_or_zero(row.get("fillFee")),
+        created_at=created_at,
+    )
+
+
+def _fill_id(row: dict[str, Any], *, order_id: str, created_at: datetime, fill_size: Decimal) -> str:
+    trade_id = row.get("tradeId")
+    if trade_id not in {None, ""}:
+        return str(trade_id)
+    timestamp_ms = int(created_at.timestamp() * 1000)
+    return f"{order_id}:{timestamp_ms}:{fill_size}"
 
 
 def _position_direction(row: dict[str, Any]) -> str:

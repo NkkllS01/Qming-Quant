@@ -157,6 +157,57 @@ def test_okx_live_state_handler_updates_orders_with_lineage() -> None:
     asyncio.run(run())
 
 
+def test_okx_live_state_handler_records_fill_from_order_update() -> None:
+    async def run() -> None:
+        store = LiveStateStore()
+        handler = OKXLiveStateHandler(
+            store,
+            account_id="okx_sub_main",
+            bot_id="okx_perp_bot_main",
+            strategy_id="btc_trend_15m",
+            run_id="live-run",
+        )
+
+        await handler.handle(
+            {
+                "arg": {"channel": "orders"},
+                "data": [
+                    {
+                        "instId": "BTC-USDT-SWAP",
+                        "ordId": "okx-1",
+                        "clOrdId": "client-1",
+                        "tradeId": "trade-1",
+                        "side": "buy",
+                        "ordType": "market",
+                        "sz": "0.1",
+                        "accFillSz": "0.1",
+                        "fillSz": "0.04",
+                        "fillPx": "70100",
+                        "fillFee": "-0.12",
+                        "avgPx": "70100",
+                        "state": "filled",
+                        "fillTime": "1717200002000",
+                        "cTime": "1717200000000",
+                        "uTime": "1717200002000",
+                    }
+                ],
+            }
+        )
+
+        fill = store.fills["trade-1"]
+        assert fill.account_id == "okx_sub_main"
+        assert fill.bot_id == "okx_perp_bot_main"
+        assert fill.strategy_id == "btc_trend_15m"
+        assert fill.run_id == "live-run"
+        assert fill.client_order_id == "client-1"
+        assert fill.side == "buy"
+        assert fill.size == Decimal("0.04")
+        assert fill.price == Decimal("70100")
+        assert fill.fee == Decimal("-0.12")
+
+    asyncio.run(run())
+
+
 def test_okx_live_state_handler_ignores_unknown_or_malformed_messages() -> None:
     async def run() -> None:
         store = LiveStateStore()
