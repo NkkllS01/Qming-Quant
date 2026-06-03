@@ -1,0 +1,18 @@
+[project]
+name = "okx-contract-trade"
+version = "0.1.0"
+description = "Personal OKX USDT perpetual contract quantitative trading system."
+requires-python = ">=3.11"
+dependencies = [
+  "httpx",
+  "pydantic",
+  "sqlalchemy",
+]
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+

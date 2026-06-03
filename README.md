@@ -1,0 +1,206 @@
+# Qiming Quant
+
+Independent personal OKX USDT perpetual contract quant trading system.
+
+Current status: early development skeleton with data sync, local candle storage, strategy signal generation, risk checks, simulated fills, and a basic backtest path. Real order placement is intentionally not implemented yet.
+
+Design docs:
+
+- [PROJECT_DESIGN.md](PROJECT_DESIGN.md): system architecture and development phases
+- [STRATEGY_RESEARCH.md](STRATEGY_RESEARCH.md): OKX perpetual strategy mining roadmap
+
+## Safety Boundary
+
+This project currently supports read-only OKX API operations and local simulation/backtesting.
+
+Not implemented yet:
+
+- Real order placement
+- Real order cancellation
+- Private WebSocket order/fill/position sync
+- Live trading loop
+
+Do not add live trading until data sync, backtesting, simulation, risk checks, and reconciliation are verified.
+
+## Setup
+
+Use Python 3.11+.
+
+```powershell
+python -m pytest -q
+python -m ruff check .
+```
+
+Phase 1 acceptance smoke test:
+
+```powershell
+python -m pytest tests/test_phase1_acceptance.py -q
+```
+
+Optional environment variables:
+
+```powershell
+$env:OKX_API_KEY = "..."
+$env:OKX_SECRET_KEY = "..."
+$env:OKX_PASSPHRASE = "..."
+$env:DATABASE_URL = "sqlite:///trade.db"
+```
+
+Public data commands do not require OKX credentials.
+
+## CLI
+
+List instruments:
+
+```powershell
+python -m app.main instruments --inst-type SWAP
+```
+
+Sync instruments into the local database:
+
+```powershell
+python -m app.main sync-instruments --inst-type SWAP
+```
+
+Sync historical candles:
+
+```powershell
+python -m app.main sync-candles --symbol BTC-USDT-SWAP --timeframe 1m --pages 1
+```
+
+Sync historical candles by an explicit time range:
+
+```powershell
+python -m app.main sync-candles-range --symbol BTC-USDT-SWAP --timeframe 1m --start 2024-01-01T00:00:00Z --end 2024-01-02T00:00:00Z
+```
+
+This command uses the OKX paginated range fetcher, so it can cover ranges larger than a single OKX response page.
+
+Check local candle coverage and gap status:
+
+```powershell
+python -m app.main candle-state --symbol BTC-USDT-SWAP --timeframe 1m
+```
+
+Repair missing local candle ranges:
+
+```powershell
+python -m app.main repair-missing --symbol BTC-USDT-SWAP --timeframe 1m
+```
+
+Aggregate locally stored 1m candles into a higher timeframe:
+
+```powershell
+python -m app.main aggregate-candles --symbol BTC-USDT-SWAP --source-timeframe 1m --target-timeframe 15m
+```
+
+Run the starter trend backtest from locally stored candles:
+
+```powershell
+python -m app.main backtest --symbol BTC-USDT-SWAP --timeframe 15m
+```
+
+Run a backtest on a specific local data slice:
+
+```powershell
+python -m app.main backtest --symbol BTC-USDT-SWAP --timeframe 15m --start 2024-01-01T00:00:00Z --end 2024-03-01T00:00:00Z
+```
+
+Save a structured JSON backtest report:
+
+```powershell
+python -m app.main backtest --symbol BTC-USDT-SWAP --timeframe 15m --report-json reports/btc_15m_backtest.json
+```
+
+`backtest` blocks by default when local candles are empty, contain timestamp gaps, or have fewer than 30 candles. Use `candle-state` and `repair-missing` first. For research-only experiments where gaps are intentional, pass `--allow-gaps`. For quick smoke tests with shorter samples, pass `--min-candles`.
+
+When local instrument specs have been synced, `backtest` uses the stored tick size, lot size, and minimum size for order intent quantization. If specs are missing, it falls back to conservative defaults.
+
+Run the starter strategy through the local simulation loop:
+
+```powershell
+python -m app.main sim-run --symbol BTC-USDT-SWAP --timeframe 15m
+```
+
+`sim-run` also supports `--start` and `--end` for running a fixed local historical window.
+
+`sim-run` uses the same candle data gate as `backtest`: empty, too-short, or gapped local candles are blocked unless the relevant override is passed. It also uses local instrument specs when available and includes the active tick, lot, and minimum sizes in its summary output. `paper-run` remains available as a compatibility alias, but `sim-run` is the preferred command.
+
+The current backtest engine supports a single-position K-line lifecycle with:
+
+- Entry from strategy `Signal`
+- Confirmed-candle signals filled at the next candle open
+- Stop-loss and take-profit exits
+- Fee and slippage accounting
+- Closed trade PnL
+- Equity curve
+- Win rate
+- Maximum drawdown
+- Gross profit/loss
+- Profit factor and payoff ratio
+- Maximum consecutive losses
+- Average holding time
+
+The current simulation loop supports:
+
+- Strategy signal generation from local candles
+- Confirmed-candle signals filled at the next candle open
+- Portfolio risk approval/rejection
+- Symbol lease checks
+- Order intent creation
+- Simulated market fills
+- Simulated position tracking
+- Stop-loss and take-profit exits from candle high/low
+- Equity updates on simulated closes
+- Simulation journal events
+- Persistence of simulated fills, positions, and journal events
+
+Saving a simulation run replaces the existing snapshot for that `run_id`, so closed positions from an older run are not restored as stale open positions.
+
+The current reconciliation module supports fail-closed local-vs-exchange position checks:
+
+- Missing local or exchange positions
+- Size mismatch
+- Direction mismatch
+- Duplicate local or exchange position rows
+- Malformed exchange position snapshots
+
+Available example strategies:
+
+- `MultiTimeframeTrendStrategy`: long-only EMA trend strategy with optional higher-timeframe confirmation and ATR-based risk percentages
+- `AtrChannelBreakoutStrategy`: long-only ATR Donchian/channel breakout strategy using confirmed OHLCV candles, recent ATR risk sizing, and ATR volatility bounds
+
+The current portfolio risk manager enforces:
+
+- Stop-loss required for open signals
+- Per-trade risk sizing from equity, entry price, and stop distance
+- Maximum open positions
+- Duplicate symbol-open rejection
+- Daily loss pause threshold
+- Total drawdown pause threshold
+- Close signals allowed without requiring a new entry price
+
+The current order factory creates traceable `client_order_id` values with:
+
+- Bot id
+- Strategy id
+- Symbol prefix
+- UTC second timestamp
+- Per-factory sequence suffix to avoid same-second collisions
+
+It also quantizes order size/price using instrument specs and rejects orders whose quantized size is below `min_size`.
+
+The current local storage layer supports:
+
+- Candle upsert and sync-state tracking
+- Local instrument specs with exact Decimal values stored as text to avoid SQLite precision noise
+
+## Development Order
+
+1. Make OKX K-line sync robust.
+2. Sync and validate local instrument specs.
+3. Store and validate local market data.
+4. Improve the starter strategy and backtest metrics.
+5. Add simulation loop.
+6. Add portfolio risk and reconciliation depth.
+7. Only then add small-size live order placement.

@@ -1,0 +1,430 @@
+from __future__ import annotations
+
+import argparse
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
+from pathlib import Path
+
+from app.config import Settings
+from backtest.engine import BacktestEngine
+from core.models import Candle, Instrument
+from exchanges.okx.gateway import OKXGateway
+from exchanges.okx.rest import OKXRestClient
+from market_data.candle_sync import CandleSyncService
+from market_data.candles import find_missing_ranges
+from paper.engine import PaperTradingEngine
+from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
+from storage.trade_repository import TradeRepository
+from strategies.examples.trend import MultiTimeframeTrendStrategy
+
+
+@dataclass
+class AppServices:
+    gateway: object
+    candle_repository: CandleRepository
+    instrument_repository: InstrumentRepository | None = None
+    funding_rate_repository: FundingRateRepository | None = None
+    trade_repository: TradeRepository | None = None
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="trade", description="OKX contract quant trading CLI")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    instruments = subparsers.add_parser("instruments", help="List OKX instruments")
+    instruments.add_argument("--inst-type", default="SWAP")
+
+    sync_instruments = subparsers.add_parser("sync-instruments", help="Sync OKX instruments locally")
+    sync_instruments.add_argument("--inst-type", default="SWAP")
+
+    sync_funding = subparsers.add_parser("sync-funding-rates", help="Sync OKX funding rates locally")
+    sync_funding.add_argument("--symbol", required=True)
+    sync_funding.add_argument("--before", default=None)
+    sync_funding.add_argument("--after", default=None)
+    sync_funding.add_argument("--limit", type=int, default=100)
+
+    sync = subparsers.add_parser("sync-candles", help="Sync historical candles")
+    sync.add_argument("--symbol", required=True)
+    sync.add_argument("--timeframe", default="1m")
+    sync.add_argument("--pages", type=int, default=1)
+
+    sync_range = subparsers.add_parser("sync-candles-range", help="Sync historical candles by time range")
+    sync_range.add_argument("--symbol", required=True)
+    sync_range.add_argument("--timeframe", default="1m")
+    sync_range.add_argument("--start", required=True)
+    sync_range.add_argument("--end", required=True)
+
+    candle_state = subparsers.add_parser("candle-state", help="Show local candle coverage and gaps")
+    candle_state.add_argument("--symbol", required=True)
+    candle_state.add_argument("--timeframe", default="1m")
+
+    backtest = subparsers.add_parser("backtest", help="Run the first trend strategy backtest")
+    backtest.add_argument("--symbol", default="BTC-USDT-SWAP")
+    backtest.add_argument("--timeframe", default="15m")
+    backtest.add_argument("--allow-gaps", action="store_true")
+    backtest.add_argument("--min-candles", type=int, default=30)
+    backtest.add_argument("--start", default=None)
+    backtest.add_argument("--end", default=None)
+    backtest.add_argument("--report-json", default=None)
+
+    sim = subparsers.add_parser("sim-run", help="Run the starter strategy through local simulation")
+    sim.add_argument("--symbol", default="BTC-USDT-SWAP")
+    sim.add_argument("--timeframe", default="15m")
+    sim.add_argument("--allow-gaps", action="store_true")
+    sim.add_argument("--min-candles", type=int, default=30)
+    sim.add_argument("--start", default=None)
+    sim.add_argument("--end", default=None)
+
+    paper = subparsers.add_parser("paper-run", help="Compatibility alias for sim-run")
+    paper.add_argument("--symbol", default="BTC-USDT-SWAP")
+    paper.add_argument("--timeframe", default="15m")
+    paper.add_argument("--allow-gaps", action="store_true")
+    paper.add_argument("--min-candles", type=int, default=30)
+    paper.add_argument("--start", default=None)
+    paper.add_argument("--end", default=None)
+
+    repair = subparsers.add_parser("repair-missing", help="Repair missing local candle ranges")
+    repair.add_argument("--symbol", required=True)
+    repair.add_argument("--timeframe", default="1m")
+
+    aggregate = subparsers.add_parser("aggregate-candles", help="Aggregate local candles")
+    aggregate.add_argument("--symbol", required=True)
+    aggregate.add_argument("--source-timeframe", default="1m")
+    aggregate.add_argument("--target-timeframe", default="15m")
+
+    return parser
+
+
+def build_services(settings: Settings | None = None) -> AppServices:
+    settings = settings or Settings.from_env()
+    rest = OKXRestClient(
+        api_key=settings.okx_api_key,
+        secret_key=settings.okx_secret_key,
+        passphrase=settings.okx_passphrase,
+    )
+    return AppServices(
+        gateway=OKXGateway(rest),
+        candle_repository=CandleRepository(settings.database_url),
+        instrument_repository=InstrumentRepository(settings.database_url),
+        funding_rate_repository=FundingRateRepository(settings.database_url),
+        trade_repository=TradeRepository(settings.database_url),
+    )
+
+
+def run_command(args: argparse.Namespace, services: AppServices) -> str:
+    if args.command == "instruments":
+        instruments = services.gateway.instruments(args.inst_type)
+        return "\n".join(
+            f"{instrument.symbol} {instrument.inst_type} tick={instrument.tick_size} "
+            f"lot={instrument.lot_size} state={instrument.state}"
+            for instrument in instruments
+        )
+    if args.command == "sync-candles":
+        sync = CandleSyncService(
+            fetch_page=services.gateway.history_candles,
+            store=services.candle_repository,
+        )
+        count = sync.sync_history(
+            args.symbol,
+            args.timeframe,
+            pages=args.pages,
+        )
+        return f"synced {count} candles for {args.symbol} {args.timeframe}"
+    if args.command == "sync-candles-range":
+        sync = CandleSyncService(
+            fetch_page=services.gateway.history_candles,
+            store=services.candle_repository,
+            fetch_range=services.gateway.history_candles_range,
+        )
+        start_at = _parse_cli_datetime(args.start)
+        end_at = _parse_cli_datetime(args.end)
+        count = sync.sync_range(args.symbol, args.timeframe, start_at, end_at)
+        return (
+            f"synced {count} candles for {args.symbol} {args.timeframe} "
+            f"range={start_at.isoformat()}->{end_at.isoformat()}"
+        )
+    if args.command == "candle-state":
+        state = services.candle_repository.refresh_sync_state(args.symbol, args.timeframe)
+        if state is None:
+            return f"candle_state symbol={args.symbol} timeframe={args.timeframe} status=empty"
+        missing_preview = ",".join(
+            f"{start.isoformat()}->{end.isoformat()}" for start, end in state.missing_ranges[:3]
+        )
+        return (
+            f"candle_state symbol={args.symbol} timeframe={args.timeframe} status=ready "
+            f"first={state.first_ts.isoformat()} last={state.last_ts.isoformat()} "
+            f"actual_count={state.actual_count} missing_ranges={len(state.missing_ranges)} "
+            f"missing_preview={missing_preview or 'none'}"
+        )
+    if args.command == "sync-instruments":
+        instruments = services.gateway.instruments(args.inst_type)
+        if services.instrument_repository is not None:
+            services.instrument_repository.upsert_many(instruments)
+        return f"synced {len(instruments)} instruments for {args.inst_type}"
+    if args.command == "sync-funding-rates":
+        rates = services.gateway.funding_rate_history(
+            args.symbol,
+            before=args.before,
+            after=args.after,
+            limit=args.limit,
+        )
+        if services.funding_rate_repository is not None:
+            services.funding_rate_repository.upsert_many(rates)
+        return f"synced {len(rates)} funding rates for {args.symbol}"
+    if args.command == "backtest":
+        candles = _list_command_candles(services, args.symbol, args.timeframe, args.start, args.end)
+        gate = _check_candle_data_gate(
+            args.symbol,
+            args.timeframe,
+            candles,
+            allow_gaps=args.allow_gaps,
+            min_candles=args.min_candles,
+        )
+        if gate is not None:
+            return gate
+        strategy = MultiTimeframeTrendStrategy(
+            account_id="okx_sub_main",
+            bot_id="okx_perp_bot_main",
+            strategy_id=f"{args.symbol.split('-')[0].lower()}_trend_{args.timeframe}",
+            symbol=args.symbol,
+            run_id="cli-backtest",
+            timeframe=args.timeframe,
+        )
+        instrument = _instrument_or_default(services, args.symbol)
+        result = BacktestEngine(
+            initial_equity=Decimal("1000"),
+            tick_size=instrument.tick_size,
+            lot_size=instrument.lot_size,
+            min_size=instrument.min_size,
+        ).run(strategy, candles)
+        metrics = result.metrics
+        report_path = None
+        if args.report_json is not None:
+            report_path = Path(args.report_json)
+            _write_backtest_report(
+                report_path,
+                symbol=args.symbol,
+                timeframe=args.timeframe,
+                start=args.start,
+                end=args.end,
+                allow_gaps=args.allow_gaps,
+                min_candles=args.min_candles,
+                candle_count=len(candles),
+                instrument=instrument,
+                result=result,
+            )
+        return (
+            f"symbol={args.symbol} timeframe={args.timeframe} "
+            f"start={args.start or 'all'} "
+            f"end={args.end or 'all'} "
+            f"tick_size={instrument.tick_size} "
+            f"lot_size={instrument.lot_size} "
+            f"min_size={instrument.min_size} "
+            f"total_trades={metrics.total_trades} "
+            f"final_equity={result.final_equity} "
+            f"win_rate={metrics.win_rate:.4f} "
+            f"max_drawdown={metrics.max_drawdown} "
+            f"profit_factor={metrics.profit_factor} "
+            f"payoff_ratio={metrics.payoff_ratio} "
+            f"max_consecutive_losses={metrics.max_consecutive_losses} "
+            f"average_holding_seconds={metrics.average_holding_seconds} "
+            f"total_fees={metrics.total_fees} "
+            f"report_json={report_path if report_path is not None else 'none'}"
+        )
+    if args.command == "repair-missing":
+        sync = CandleSyncService(
+            fetch_page=services.gateway.history_candles,
+            store=services.candle_repository,
+            fetch_range=services.gateway.history_candles_range,
+        )
+        count = sync.repair_missing_ranges(args.symbol, args.timeframe)
+        return f"repaired {count} candles for {args.symbol} {args.timeframe}"
+    if args.command == "aggregate-candles":
+        sync = CandleSyncService(
+            fetch_page=services.gateway.history_candles,
+            store=services.candle_repository,
+        )
+        count = sync.aggregate_and_store(
+            args.symbol,
+            args.source_timeframe,
+            args.target_timeframe,
+        )
+        return (
+            f"aggregated {count} candles for {args.symbol} "
+            f"{args.source_timeframe}->{args.target_timeframe}"
+        )
+    if args.command in {"sim-run", "paper-run"}:
+        run_id = "cli-sim" if args.command == "sim-run" else "cli-paper"
+        output_prefix = "sim_run" if args.command == "sim-run" else "paper_run"
+        candles = _list_command_candles(services, args.symbol, args.timeframe, args.start, args.end)
+        gate = _check_candle_data_gate(
+            args.symbol,
+            args.timeframe,
+            candles,
+            allow_gaps=args.allow_gaps,
+            min_candles=args.min_candles,
+        )
+        if gate is not None:
+            return f"{output_prefix} {gate}"
+        strategy = MultiTimeframeTrendStrategy(
+            account_id="okx_sub_main",
+            bot_id="okx_perp_bot_main",
+            strategy_id=f"{args.symbol.split('-')[0].lower()}_trend_{args.timeframe}",
+            symbol=args.symbol,
+            run_id=run_id,
+            timeframe=args.timeframe,
+        )
+        instrument = _instrument_or_default(services, args.symbol)
+        result = PaperTradingEngine(
+            initial_equity=Decimal("1000"),
+            tick_size=instrument.tick_size,
+            lot_size=instrument.lot_size,
+            min_size=instrument.min_size,
+        ).run(strategy, candles)
+        persisted = False
+        if services.trade_repository is not None:
+            services.trade_repository.save_paper_run(
+                run_id=run_id,
+                fills=result.fills,
+                positions=result.positions,
+                journal=result.journal,
+            )
+            persisted = True
+        return (
+            f"{output_prefix} symbol={args.symbol} timeframe={args.timeframe} "
+            f"start={args.start or 'all'} end={args.end or 'all'} "
+            f"tick_size={instrument.tick_size} lot_size={instrument.lot_size} "
+            f"min_size={instrument.min_size} "
+            f"signals={result.signals_count} approved={result.approved_count} "
+            f"rejected={result.rejected_count} fills={result.fills_count} "
+            f"positions={result.positions_count} final_equity={result.final_equity} "
+            f"persisted={str(persisted).lower()}"
+        )
+    raise ValueError(f"Unsupported command: {args.command}")
+
+
+def _instrument_or_default(services: AppServices, symbol: str) -> Instrument:
+    if services.instrument_repository is not None:
+        instrument = services.instrument_repository.get(symbol)
+        if instrument is not None:
+            return instrument
+    return Instrument(
+        symbol=symbol,
+        inst_type="SWAP",
+        tick_size=Decimal("0.1"),
+        lot_size=Decimal("0.01"),
+        min_size=Decimal("0.01"),
+        state="unknown",
+    )
+
+
+def _write_backtest_report(
+    path: Path,
+    *,
+    symbol: str,
+    timeframe: str,
+    start: str | None,
+    end: str | None,
+    allow_gaps: bool,
+    min_candles: int,
+    candle_count: int,
+    instrument: Instrument,
+    result,
+) -> None:
+    report = {
+        "system": "Qiming Quant",
+        "command": "backtest",
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "data_window": {
+            "start": start or "all",
+            "end": end or "all",
+            "candle_count": candle_count,
+            "allow_gaps": allow_gaps,
+            "min_candles": min_candles,
+        },
+        "instrument": {
+            "tick_size": str(instrument.tick_size),
+            "lot_size": str(instrument.lot_size),
+            "min_size": str(instrument.min_size),
+        },
+        "initial_equity": str(result.initial_equity),
+        "final_equity": str(result.final_equity),
+        "metrics": _json_ready(result.metrics.model_dump()),
+        "trades": _json_ready([trade.model_dump() for trade in result.trades]),
+        "equity_curve": _json_ready([point.model_dump() for point in result.equity_curve]),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _json_ready(value):
+    if isinstance(value, dict):
+        return {key: _json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _list_command_candles(
+    services: AppServices,
+    symbol: str,
+    timeframe: str,
+    start: str | None,
+    end: str | None,
+) -> list[Candle]:
+    start_at = _parse_cli_datetime(start) if start is not None else None
+    end_at = _parse_cli_datetime(end) if end is not None else None
+    if start_at is not None and end_at is not None and end_at < start_at:
+        raise ValueError("end must be greater than or equal to start")
+    return services.candle_repository.list_candles(symbol, timeframe, start=start_at, end=end_at)
+
+
+def _check_candle_data_gate(
+    symbol: str,
+    timeframe: str,
+    candles: list[Candle],
+    *,
+    allow_gaps: bool,
+    min_candles: int,
+) -> str | None:
+    if not candles:
+        return f"data_gate status=blocked reason=empty symbol={symbol} timeframe={timeframe}"
+    missing_ranges = find_missing_ranges(candles, timeframe)
+    if missing_ranges and not allow_gaps:
+        first_missing = missing_ranges[0]
+        return (
+            f"data_gate status=blocked reason=missing_candles symbol={symbol} timeframe={timeframe} "
+            f"missing_ranges={len(missing_ranges)} "
+            f"first_missing={first_missing[0].isoformat()}->{first_missing[1].isoformat()}"
+        )
+    if len(candles) < min_candles:
+        return (
+            f"data_gate status=blocked reason=insufficient_candles symbol={symbol} timeframe={timeframe} "
+            f"actual_count={len(candles)} min_candles={min_candles}"
+        )
+    return None
+
+
+def _parse_cli_datetime(value: str) -> datetime:
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    print(run_command(args, build_services()))
+
+
+if __name__ == "__main__":
+    main()
