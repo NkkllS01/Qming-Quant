@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from core.models import Candle, FundingRate, Instrument
+from core.models import Candle, FundingRate, Instrument, OrderIntent
 from exchanges.okx.mapper import map_funding_rate, map_instrument, map_okx_candles
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient
@@ -105,3 +105,28 @@ class OKXGateway:
 
     def orders_pending(self, inst_type: str = "SWAP") -> dict:
         return self.rest.get("/api/v5/trade/orders-pending", {"instType": inst_type}, private=True)
+
+    def place_order(self, intent: OrderIntent, *, td_mode: str = "isolated") -> dict:
+        body = {
+            "instId": intent.symbol,
+            "tdMode": td_mode,
+            "clOrdId": intent.client_order_id,
+            "side": intent.side,
+            "ordType": intent.order_type,
+            "sz": str(intent.size),
+        }
+        if intent.price is not None:
+            body["px"] = str(intent.price)
+        if intent.reduce_only:
+            body["reduceOnly"] = "true"
+        return self.rest.post("/api/v5/trade/order", body, private=True)
+
+    def cancel_order(self, *, symbol: str, order_id: str | None = None, client_order_id: str | None = None) -> dict:
+        if order_id is None and client_order_id is None:
+            raise ValueError("cancel_order requires order_id or client_order_id")
+        body = {"instId": symbol}
+        if order_id is not None:
+            body["ordId"] = order_id
+        if client_order_id is not None:
+            body["clOrdId"] = client_order_id
+        return self.rest.post("/api/v5/trade/cancel-order", body, private=True)

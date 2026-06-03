@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from typing import Any
 
 import httpx
@@ -58,3 +59,14 @@ class OKXRestClient:
         response.raise_for_status()
         return response.json()
 
+    def post(self, path: str, body: dict[str, Any], *, private: bool = False) -> dict:
+        body_text = json.dumps(body, separators=(",", ":"))
+        headers = self._headers("POST", path, body_text) if private else {"Content-Type": "application/json"}
+        response = httpx.post(
+            f"{self.base_url}{path}",
+            content=body_text,
+            headers=headers,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()

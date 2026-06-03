@@ -173,6 +173,8 @@ python -m app.main emergency-pause --reason operator_stop
 python -m app.main emergency-resume --reason operator_resume
 ```
 
+The codebase includes a minimal OKX REST order adapter and a live execution service that must pass the trading gate before calling OKX. There is intentionally no live order CLI yet; live order placement should only be exposed after the gated execution path is reviewed with small-size constraints.
+
 The current backtest engine supports a single-position K-line lifecycle with:
 
 - Entry from strategy `Signal`

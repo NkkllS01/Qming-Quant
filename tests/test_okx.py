@@ -5,8 +5,12 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import httpx
+
+from core.models import OrderIntent
 from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.mapper import map_funding_rate, map_instrument, map_okx_candles
+from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.signer import sign_okx_request
 from exchanges.okx.websocket import (
     OKX_WS_VERIFY_PATH,
@@ -202,6 +206,77 @@ def test_okx_gateway_exposes_configured_websocket_clients() -> None:
     assert gateway.private_ws is private_ws
 
 
+def test_okx_rest_client_post_signs_compact_json_body(monkeypatch) -> None:
+    captured: dict = {}
+    client = StaticTimestampRestClient(
+        api_key="key",
+        secret_key="secret",
+        passphrase="pass",
+        base_url="https://example.test",
+    )
+
+    def fake_post(url, *, content, headers, timeout):
+        captured.update({"url": url, "content": content, "headers": headers, "timeout": timeout})
+        return FakeHttpResponse({"data": [{"ordId": "okx-1"}]})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    response = client.post("/api/v5/trade/order", {"instId": "BTC-USDT-SWAP", "sz": "0.1"}, private=True)
+
+    expected_body = '{"instId":"BTC-USDT-SWAP","sz":"0.1"}'
+    expected_sign = sign_okx_request(
+        "2024-01-01T00:00:00.000Z",
+        "POST",
+        "/api/v5/trade/order",
+        expected_body,
+        "secret",
+    )
+    assert response == {"data": [{"ordId": "okx-1"}]}
+    assert captured["url"] == "https://example.test/api/v5/trade/order"
+    assert captured["content"] == expected_body
+    assert captured["headers"]["OK-ACCESS-SIGN"] == expected_sign
+
+
+def test_okx_gateway_places_order_from_order_intent() -> None:
+    rest = FakeTradeRest()
+    gateway = OKXGateway(rest)
+    intent = _order_intent(price=None, reduce_only=True)
+
+    response = gateway.place_order(intent, td_mode="isolated")
+
+    assert response == {"data": [{"ordId": "okx-1"}]}
+    assert rest.posts == [
+        {
+            "path": "/api/v5/trade/order",
+            "body": {
+                "instId": "BTC-USDT-SWAP",
+                "tdMode": "isolated",
+                "clOrdId": "client-1",
+                "side": "buy",
+                "ordType": "market",
+                "sz": "0.1",
+                "reduceOnly": "true",
+            },
+            "private": True,
+        }
+    ]
+
+
+def test_okx_gateway_cancels_order_by_client_order_id() -> None:
+    rest = FakeTradeRest()
+    gateway = OKXGateway(rest)
+
+    gateway.cancel_order(symbol="BTC-USDT-SWAP", client_order_id="client-1")
+
+    assert rest.posts == [
+        {
+            "path": "/api/v5/trade/cancel-order",
+            "body": {"instId": "BTC-USDT-SWAP", "clOrdId": "client-1"},
+            "private": True,
+        }
+    ]
+
+
 def test_okx_websocket_runtime_subscribes_and_dispatches_public_messages() -> None:
     async def run() -> None:
         received: list[dict] = []
@@ -370,6 +445,31 @@ class FakeRest:
         return {"data": self.rows_by_after.get(params["after"], [])}
 
 
+class FakeTradeRest:
+    def __init__(self) -> None:
+        self.posts: list[dict] = []
+
+    def post(self, path: str, body: dict, *, private: bool = False) -> dict:
+        self.posts.append({"path": path, "body": body, "private": private})
+        return {"data": [{"ordId": "okx-1"}]}
+
+
+class StaticTimestampRestClient(OKXRestClient):
+    def _timestamp(self) -> str:
+        return "2024-01-01T00:00:00.000Z"
+
+
+class FakeHttpResponse:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self.payload
+
+
 class FakeWebSocketSender:
     def __init__(self) -> None:
         self.messages: list[dict] = []
@@ -441,3 +541,20 @@ def _okx_candle_row(timestamp: datetime, close: str) -> list[str]:
         "10",
         "1",
     ]
+
+
+def _order_intent(*, price: Decimal | None, reduce_only: bool) -> OrderIntent:
+    return OrderIntent(
+        account_id="okx_sub_main",
+        bot_id="okx_perp_bot_main",
+        strategy_id="btc_trend_15m",
+        symbol="BTC-USDT-SWAP",
+        run_id="live",
+        side="buy",
+        position_action="open",
+        order_type="market" if price is None else "limit",
+        size=Decimal("0.1"),
+        price=price,
+        reduce_only=reduce_only,
+        client_order_id="client-1",
+    )
