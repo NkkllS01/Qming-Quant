@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.config import Settings
-from app.main import AppServices, build_parser, run_command
+from app.main import AppServices, build_parser, build_services, run_command
 from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice, Order
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
 from live.state import AccountBalance
@@ -77,6 +77,22 @@ def test_settings_rejects_empty_default_symbols(monkeypatch) -> None:
         assert "DEFAULT_SYMBOLS must contain at least one symbol" in str(exc)
     else:
         raise AssertionError("expected empty DEFAULT_SYMBOLS to be rejected")
+
+
+def test_build_services_passes_okx_rest_demo_settings() -> None:
+    settings = Settings(
+        okx_api_key="key",
+        okx_secret_key="secret",
+        okx_passphrase="passphrase",
+        okx_base_url="https://example.test/",
+        okx_simulated_trading=True,
+        database_url="sqlite:///:memory:",
+    )
+
+    services = build_services(settings)
+
+    assert services.gateway.rest.base_url == "https://example.test"
+    assert services.gateway.rest.simulated_trading is True
 
 
 def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:

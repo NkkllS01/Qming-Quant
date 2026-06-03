@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+import re
 from typing import Any
 
 from core.models import Order, OrderIntent
 from live.trading_gate import TradingGateResult, TradingGateService
 from storage.live_repository import LiveStateRepository
+
+CLIENT_ORDER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,8 @@ class LiveOrderPolicy:
     instrument_repository: object | None = None
 
     def evaluate(self, intent: OrderIntent, *, td_mode: str) -> LiveOrderPolicyResult:
+        if not CLIENT_ORDER_ID_PATTERN.fullmatch(intent.client_order_id):
+            return LiveOrderPolicyResult(False, "invalid_client_order_id")
         if intent.symbol not in self.allowed_symbols:
             return LiveOrderPolicyResult(False, "symbol_not_allowed")
         if td_mode not in self.allowed_td_modes:

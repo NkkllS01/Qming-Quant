@@ -232,6 +232,8 @@ def build_services(settings: Settings | None = None) -> AppServices:
         api_key=settings.okx_api_key,
         secret_key=settings.okx_secret_key,
         passphrase=settings.okx_passphrase,
+        base_url=settings.okx_base_url,
+        simulated_trading=settings.okx_simulated_trading,
     )
     public_ws = OKXWebSocketClient(OKXWebSocketConfig())
     private_ws = OKXWebSocketClient(

@@ -88,6 +88,22 @@ def test_live_order_execution_rejects_market_order_with_price_before_gate() -> N
     assert gateway.placed == []
 
 
+def test_live_order_execution_rejects_invalid_client_order_id_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+    )
+
+    result = service.submit_order(_intent(client_order_id="bad id"))
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "invalid_client_order_id"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
 def test_live_order_execution_rejects_missing_instrument_spec_before_gate() -> None:
     gateway = FakeGateway()
     trading_gate = FakeTradingGate(status="allowed")
@@ -101,6 +117,30 @@ def test_live_order_execution_rejects_missing_instrument_spec_before_gate() -> N
 
     assert result.status == "policy_rejected"
     assert result.reason == "instrument_spec_missing"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
+def test_live_order_execution_rejects_non_live_instrument_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    _seed_instrument(
+        instrument_repo,
+        min_size=Decimal("0.01"),
+        lot_size=Decimal("0.01"),
+        state="suspend",
+    )
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+        instrument_repository=instrument_repo,
+    )
+
+    result = service.submit_order(_intent(size=Decimal("0.1")))
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "instrument_not_live"
     assert trading_gate.evaluations == 0
     assert gateway.placed == []
 
@@ -445,6 +485,7 @@ def _intent(
     size: Decimal = Decimal("0.1"),
     price: Decimal | None = None,
     reduce_only: bool = False,
+    client_order_id: str = "client-1",
 ) -> OrderIntent:
     return OrderIntent(
         account_id="okx_sub_main",
@@ -458,7 +499,7 @@ def _intent(
         size=size,
         price=price,
         reduce_only=reduce_only,
-        client_order_id="client-1",
+        client_order_id=client_order_id,
     )
 
 

@@ -54,6 +54,12 @@ Phase 3 local risk-controls smoke test:
 python scripts/phase3_risk_controls_check.py
 ```
 
+Pre-live order dry-run smoke test:
+
+```powershell
+python scripts/prelive_order_check.py
+```
+
 Optional environment variables:
 
 ```powershell
