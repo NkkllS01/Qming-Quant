@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,7 +13,8 @@ from backtest.engine import BacktestEngine
 from core.models import Candle, Instrument
 from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.rest import OKXRestClient
-from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
+from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig, WebsocketsConnector
+from live.sync import LiveSyncService
 from market_data.candle_sync import CandleSyncService
 from market_data.candles import find_missing_ranges
 from paper.engine import PaperTradingEngine
@@ -28,6 +30,7 @@ class AppServices:
     instrument_repository: InstrumentRepository | None = None
     funding_rate_repository: FundingRateRepository | None = None
     trade_repository: TradeRepository | None = None
+    websocket_connector: object | None = None
 
 
 @dataclass
@@ -146,6 +149,13 @@ def build_parser() -> argparse.ArgumentParser:
     aggregate.add_argument("--source-timeframe", default="1m")
     aggregate.add_argument("--target-timeframe", default="15m")
 
+    live_sync = subparsers.add_parser("live-sync", help="Manually run read-only OKX live state sync")
+    live_sync.add_argument("--symbol", action="append", default=[])
+    live_sync.add_argument("--account-id", default="okx_sub_main")
+    live_sync.add_argument("--max-messages", type=int, default=1)
+    live_sync.add_argument("--public-only", action="store_true")
+    live_sync.add_argument("--private-only", action="store_true")
+
     return parser
 
 
@@ -170,6 +180,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         instrument_repository=InstrumentRepository(settings.database_url),
         funding_rate_repository=FundingRateRepository(settings.database_url),
         trade_repository=TradeRepository(settings.database_url),
+        websocket_connector=WebsocketsConnector(),
     )
 
 
@@ -386,6 +397,41 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"rejected={result.rejected_count} fills={result.fills_count} "
             f"positions={result.positions_count} final_equity={result.final_equity} "
             f"persisted={str(persisted).lower()}"
+        )
+    if args.command == "live-sync":
+        if args.public_only and args.private_only:
+            raise ValueError("public-only and private-only cannot be used together")
+        connector = services.websocket_connector
+        if connector is None:
+            raise RuntimeError("OKX WebSocket connector is not configured")
+        symbols = args.symbol or ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+        service = LiveSyncService(
+            gateway=services.gateway,
+            connector=connector,
+            account_id=args.account_id,
+            symbols=symbols,
+        )
+        result = asyncio.run(
+            service.run_once(
+                include_public=not args.private_only,
+                include_private=not args.public_only,
+                max_messages_per_connection=args.max_messages,
+            )
+        )
+        mode = "both"
+        if args.public_only:
+            mode = "public"
+        elif args.private_only:
+            mode = "private"
+        return (
+            f"live_sync mode={mode} symbols={','.join(symbols)} "
+            f"public_messages={result.public_messages} "
+            f"private_messages={result.private_messages} "
+            f"tickers={result.tickers_count} "
+            f"balances={result.balances_count} "
+            f"positions={result.positions_count} "
+            f"orders={result.orders_count} "
+            f"trading_enabled={str(result.trading_enabled).lower()}"
         )
     raise ValueError(f"Unsupported command: {args.command}")
 

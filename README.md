@@ -142,6 +142,14 @@ python -m app.main sim-run --symbol BTC-USDT-SWAP --timeframe 15m
 
 `sim-run` uses the same candle data gate as `backtest`: empty, too-short, or gapped local candles are blocked unless the relevant override is passed. It also uses local instrument specs when available and includes the active tick, lot, and minimum sizes in its summary output. `paper-run` remains available as a compatibility alias, but `sim-run` is the preferred command.
 
+Manually run read-only live state synchronization:
+
+```powershell
+python -m app.main live-sync --symbol BTC-USDT-SWAP --max-messages 1 --public-only
+```
+
+`live-sync` wires the OKX WebSocket runtime, network adapter, and live state handler together. It can update local in-memory ticker, balance, position, and order state, but it does not place or cancel orders. Use `--public-only` for market-data smoke tests before running private account subscriptions.
+
 The current backtest engine supports a single-position K-line lifecycle with:
 
 - Entry from strategy `Signal`

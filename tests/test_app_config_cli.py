@@ -6,6 +6,7 @@ from pathlib import Path
 from app.config import Settings
 from app.main import AppServices, build_parser, run_command
 from core.models import Candle, FundingRate, Instrument
+from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
 from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
 from storage.trade_repository import TradeRepository
 
@@ -76,6 +77,9 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     sync_funding_args = parser.parse_args(
         ["sync-funding-rates", "--symbol", "BTC-USDT-SWAP", "--limit", "2"]
     )
+    live_sync_args = parser.parse_args(
+        ["live-sync", "--symbol", "BTC-USDT-SWAP", "--max-messages", "1", "--public-only"]
+    )
 
     assert sync_args.command == "sync-candles"
     assert sync_args.symbol == "BTC-USDT-SWAP"
@@ -105,12 +109,20 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert sync_funding_args.command == "sync-funding-rates"
     assert sync_funding_args.symbol == "BTC-USDT-SWAP"
     assert sync_funding_args.limit == 2
+    assert live_sync_args.command == "live-sync"
+    assert live_sync_args.symbol == ["BTC-USDT-SWAP"]
+    assert live_sync_args.max_messages == 1
+    assert live_sync_args.public_only is True
 
 
 class FakeGateway:
     def __init__(self) -> None:
         self.instrument_calls: list[str] = []
         self.candle_calls: list[dict] = []
+        self.public_ws = OKXWebSocketClient(OKXWebSocketConfig())
+        self.private_ws = OKXWebSocketClient(
+            OKXWebSocketConfig(api_key="key", secret_key="secret", passphrase="pass")
+        )
 
     def instruments(self, inst_type: str = "SWAP") -> list[Instrument]:
         self.instrument_calls.append(inst_type)
@@ -1030,3 +1042,147 @@ def test_run_paper_run_command_remains_compatible() -> None:
 
     assert "paper_run" in output
     assert len(trade_repo.list_fills("cli-paper")) >= 1
+
+
+def test_run_live_sync_command_updates_public_and_private_state_summary() -> None:
+    connector = FakeWebSocketConnector(
+        [
+            FakeWebSocketSession(
+                [
+                    {
+                        "arg": {"channel": "tickers"},
+                        "data": [
+                            {
+                                "instId": "BTC-USDT-SWAP",
+                                "last": "70000",
+                                "ts": "1717200000000",
+                            }
+                        ],
+                    }
+                ]
+            ),
+            FakeWebSocketSession(
+                [
+                    {
+                        "arg": {"channel": "account"},
+                        "data": [
+                            {
+                                "uTime": "1717200001000",
+                                "details": [
+                                    {
+                                        "ccy": "USDT",
+                                        "eq": "1000",
+                                        "availBal": "900",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            ),
+        ]
+    )
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        websocket_connector=connector,
+    )
+    args = build_parser().parse_args(
+        ["live-sync", "--symbol", "BTC-USDT-SWAP", "--max-messages", "1"]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_sync mode=both" in output
+    assert "symbols=BTC-USDT-SWAP" in output
+    assert "public_messages=1" in output
+    assert "private_messages=1" in output
+    assert "tickers=1" in output
+    assert "balances=1" in output
+    assert "trading_enabled=false" in output
+    assert connector.urls == [
+        "wss://ws.okx.com:8443/ws/v5/public",
+        "wss://ws.okx.com:8443/ws/v5/private",
+    ]
+
+
+def test_run_live_sync_command_public_only_skips_private_connection() -> None:
+    connector = FakeWebSocketConnector(
+        [
+            FakeWebSocketSession(
+                [
+                    {
+                        "arg": {"channel": "tickers"},
+                        "data": [
+                            {
+                                "instId": "ETH-USDT-SWAP",
+                                "last": "3000",
+                                "ts": "1717200000000",
+                            }
+                        ],
+                    }
+                ]
+            )
+        ]
+    )
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        websocket_connector=connector,
+    )
+    args = build_parser().parse_args(
+        ["live-sync", "--symbol", "ETH-USDT-SWAP", "--max-messages", "1", "--public-only"]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_sync mode=public" in output
+    assert "public_messages=1" in output
+    assert "private_messages=0" in output
+    assert len(connector.urls) == 1
+
+
+def test_run_live_sync_command_rejects_conflicting_modes() -> None:
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        websocket_connector=FakeWebSocketConnector([]),
+    )
+    args = build_parser().parse_args(["live-sync", "--public-only", "--private-only"])
+
+    try:
+        run_command(args, services)
+    except ValueError as exc:
+        assert "cannot be used together" in str(exc)
+    else:
+        raise AssertionError("expected conflicting live-sync modes to be rejected")
+
+
+class FakeWebSocketSession:
+    def __init__(self, messages: list[dict]) -> None:
+        self.messages = list(messages)
+        self.sent: list[dict] = []
+        self.closed = False
+
+    async def send_json(self, message: dict) -> None:
+        self.sent.append(message)
+
+    async def receive_json(self) -> dict:
+        if not self.messages:
+            raise ConnectionError("no messages")
+        return self.messages.pop(0)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class FakeWebSocketConnector:
+    def __init__(self, sessions: list[FakeWebSocketSession]) -> None:
+        self.sessions = list(sessions)
+        self.urls: list[str] = []
+
+    async def connect(self, url: str) -> FakeWebSocketSession:
+        self.urls.append(url)
+        if not self.sessions:
+            raise ConnectionError("no sessions")
+        return self.sessions.pop(0)
