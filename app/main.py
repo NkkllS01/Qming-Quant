@@ -33,6 +33,8 @@ from storage.repositories import (
 )
 from storage.safety_repository import SafetyRepository
 from storage.trade_repository import TradeRepository
+from strategies.base import BaseStrategy
+from strategies.examples.ma_crossover import MovingAverageCrossoverStrategy
 from strategies.examples.trend import MultiTimeframeTrendStrategy
 
 
@@ -152,6 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--start", default=None)
     backtest.add_argument("--end", default=None)
     backtest.add_argument("--report-json", default=None)
+    backtest.add_argument("--strategy", default="trend", choices=["trend", "ma-crossover"])
 
     sim = subparsers.add_parser("sim-run", help="Run the starter strategy through local simulation")
     sim.add_argument("--symbol", default="BTC-USDT-SWAP")
@@ -160,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--min-candles", type=int, default=30)
     sim.add_argument("--start", default=None)
     sim.add_argument("--end", default=None)
+    sim.add_argument("--strategy", default="trend", choices=["trend", "ma-crossover"])
 
     paper = subparsers.add_parser("paper-run", help="Compatibility alias for sim-run")
     paper.add_argument("--symbol", default="BTC-USDT-SWAP")
@@ -168,6 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     paper.add_argument("--min-candles", type=int, default=30)
     paper.add_argument("--start", default=None)
     paper.add_argument("--end", default=None)
+    paper.add_argument("--strategy", default="trend", choices=["trend", "ma-crossover"])
 
     repair = subparsers.add_parser("repair-missing", help="Repair missing local candle ranges")
     repair.add_argument("--symbol", required=True)
@@ -349,13 +354,11 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
                 )
             suffix = f" report_json={report_path}" if report_path is not None else ""
             return f"{gate.to_cli()}{suffix}"
-        strategy = MultiTimeframeTrendStrategy(
-            account_id="okx_sub_main",
-            bot_id="okx_perp_bot_main",
-            strategy_id=f"{args.symbol.split('-')[0].lower()}_trend_{args.timeframe}",
+        strategy = _build_cli_strategy(
+            args.strategy,
             symbol=args.symbol,
-            run_id="cli-backtest",
             timeframe=args.timeframe,
+            run_id="cli-backtest",
         )
         instrument = _instrument_or_default(services, args.symbol)
         result = BacktestEngine(
@@ -388,7 +391,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
                 funding_context=funding_context,
             )
         return (
-            f"symbol={args.symbol} timeframe={args.timeframe} "
+            f"symbol={args.symbol} timeframe={args.timeframe} strategy={args.strategy} "
             f"start={args.start or 'all'} "
             f"end={args.end or 'all'} "
             f"tick_size={instrument.tick_size} "
@@ -440,13 +443,11 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         )
         if gate.status == "blocked":
             return f"{output_prefix} {gate.to_cli()}"
-        strategy = MultiTimeframeTrendStrategy(
-            account_id="okx_sub_main",
-            bot_id="okx_perp_bot_main",
-            strategy_id=f"{args.symbol.split('-')[0].lower()}_trend_{args.timeframe}",
+        strategy = _build_cli_strategy(
+            args.strategy,
             symbol=args.symbol,
-            run_id=run_id,
             timeframe=args.timeframe,
+            run_id=run_id,
         )
         instrument = _instrument_or_default(services, args.symbol)
         result = PaperTradingEngine(
@@ -465,7 +466,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             )
             persisted = True
         return (
-            f"{output_prefix} symbol={args.symbol} timeframe={args.timeframe} "
+            f"{output_prefix} symbol={args.symbol} timeframe={args.timeframe} strategy={args.strategy} "
             f"start={args.start or 'all'} end={args.end or 'all'} "
             f"tick_size={instrument.tick_size} lot_size={instrument.lot_size} "
             f"min_size={instrument.min_size} "
@@ -669,6 +670,27 @@ def _instrument_or_default(services: AppServices, symbol: str) -> Instrument:
         lot_size=Decimal("0.01"),
         min_size=Decimal("0.01"),
         state="unknown",
+    )
+
+
+def _build_cli_strategy(strategy_name: str, *, symbol: str, timeframe: str, run_id: str) -> BaseStrategy:
+    symbol_prefix = symbol.split("-")[0].lower()
+    if strategy_name == "ma-crossover":
+        return MovingAverageCrossoverStrategy(
+            account_id="okx_sub_main",
+            bot_id="okx_perp_bot_main",
+            strategy_id=f"{symbol_prefix}_ma_crossover_{timeframe}",
+            symbol=symbol,
+            run_id=run_id,
+            timeframe=timeframe,
+        )
+    return MultiTimeframeTrendStrategy(
+        account_id="okx_sub_main",
+        bot_id="okx_perp_bot_main",
+        strategy_id=f"{symbol_prefix}_trend_{timeframe}",
+        symbol=symbol,
+        run_id=run_id,
+        timeframe=timeframe,
     )
 
 

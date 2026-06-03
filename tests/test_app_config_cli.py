@@ -110,6 +110,8 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
             "2024-01-01T01:00:00Z",
             "--report-json",
             "reports/backtest.json",
+            "--strategy",
+            "ma-crossover",
         ]
     )
     aggregate_args = parser.parse_args(
@@ -164,11 +166,13 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert backtest_args.start == "2024-01-01T00:00:00Z"
     assert backtest_args.end == "2024-01-01T01:00:00Z"
     assert backtest_args.report_json == "reports/backtest.json"
+    assert backtest_args.strategy == "ma-crossover"
     assert aggregate_args.command == "aggregate-candles"
     assert aggregate_args.source_timeframe == "1m"
     assert aggregate_args.target_timeframe == "15m"
     assert sim_args.command == "sim-run"
     assert sim_args.symbol == "BTC-USDT-SWAP"
+    assert sim_args.strategy == "trend"
     assert paper_args.command == "paper-run"
     assert paper_args.symbol == "BTC-USDT-SWAP"
     assert sync_instruments_args.command == "sync-instruments"
@@ -527,6 +531,29 @@ def test_run_backtest_command_reads_repository_and_returns_metrics() -> None:
     assert "tick_size=0.5" in output
     assert "lot_size=0.03" in output
     assert "min_size=0.03" in output
+
+
+def test_run_backtest_command_can_use_ma_crossover_strategy() -> None:
+    repo = CandleRepository("sqlite:///:memory:")
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    repo.upsert_many(_ma_crossover_candles(start))
+    services = AppServices(gateway=FakeGateway(), candle_repository=repo)
+    args = build_parser().parse_args(
+        [
+            "backtest",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--timeframe",
+            "15m",
+            "--strategy",
+            "ma-crossover",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "strategy=ma-crossover" in output
+    assert "total_trades=" in output
 
 
 def test_run_backtest_command_blocks_missing_candles_by_default() -> None:
@@ -1033,6 +1060,36 @@ def test_run_sim_run_command_reads_repository_and_returns_summary() -> None:
     assert len(trade_repo.list_positions("cli-sim")) <= 1
     assert len(trade_repo.list_journal("cli-sim")) >= 1
     assert "lot_size=0.03" in output
+
+
+def test_run_sim_run_command_can_use_ma_crossover_strategy() -> None:
+    repo = CandleRepository("sqlite:///:memory:")
+    trade_repo = TradeRepository("sqlite:///:memory:")
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    repo.upsert_many(_ma_crossover_candles(start))
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=repo,
+        trade_repository=trade_repo,
+    )
+    args = build_parser().parse_args(
+        [
+            "sim-run",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--timeframe",
+            "15m",
+            "--strategy",
+            "ma-crossover",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "strategy=ma-crossover" in output
+    assert "signals=" in output
+    assert "persisted=true" in output
+    assert len(trade_repo.list_journal("cli-sim")) >= 1
 
 
 def test_run_sim_run_command_blocks_missing_candles_by_default() -> None:
@@ -1781,3 +1838,28 @@ def _add_usdt_balance(store) -> None:
             updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
         )
     )
+
+
+def _ma_crossover_candles(start: datetime) -> list[Candle]:
+    closes = [Decimal("100") for _ in range(24)] + [
+        Decimal("102"),
+        Decimal("104"),
+        Decimal("106"),
+        Decimal("108"),
+        Decimal("110"),
+        Decimal("112"),
+    ]
+    return [
+        Candle(
+            symbol="BTC-USDT-SWAP",
+            timeframe="15m",
+            timestamp=start + timedelta(minutes=15 * idx),
+            open=close,
+            high=close + Decimal("1"),
+            low=close - Decimal("1"),
+            close=close,
+            volume=Decimal("100"),
+            confirmed=True,
+        )
+        for idx, close in enumerate(closes)
+    ]

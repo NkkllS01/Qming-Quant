@@ -145,6 +145,7 @@ Run the starter trend backtest from locally stored candles:
 
 ```powershell
 python -m app.main backtest --symbol BTC-USDT-SWAP --timeframe 15m
+python -m app.main backtest --symbol BTC-USDT-SWAP --timeframe 15m --strategy ma-crossover
 ```
 
 Run a backtest on a specific local data slice:
@@ -171,6 +172,7 @@ Run the starter strategy through the local simulation loop:
 
 ```powershell
 python -m app.main sim-run --symbol BTC-USDT-SWAP --timeframe 15m
+python -m app.main sim-run --symbol BTC-USDT-SWAP --timeframe 15m --strategy ma-crossover
 ```
 
 `sim-run` also supports `--start` and `--end` for running a fixed local historical window.
@@ -262,6 +264,7 @@ The current reconciliation module supports fail-closed local-vs-exchange positio
 
 Available example strategies:
 
+- `MovingAverageCrossoverStrategy`: long-only fast/slow SMA crossover strategy for the basic local strategy loop
 - `MultiTimeframeTrendStrategy`: long-only EMA trend strategy with optional higher-timeframe confirmation and ATR-based risk percentages
 - `AtrChannelBreakoutStrategy`: long-only ATR Donchian/channel breakout strategy using confirmed OHLCV candles, recent ATR risk sizing, and ATR volatility bounds
 
