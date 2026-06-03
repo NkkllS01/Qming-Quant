@@ -49,6 +49,12 @@ $env:OKX_API_KEY = "..."
 $env:OKX_SECRET_KEY = "..."
 $env:OKX_PASSPHRASE = "..."
 $env:DATABASE_URL = "sqlite:///trade.db"
+$env:DEFAULT_SYMBOLS = "BTC-USDT-SWAP,ETH-USDT-SWAP"
+$env:MAX_RISK_PER_TRADE = "0.005"
+$env:MAX_DAILY_LOSS = "0.03"
+$env:MAX_TOTAL_DRAWDOWN_PAUSE = "0.08"
+$env:MAX_LEVERAGE = "3"
+$env:MAX_OPEN_POSITIONS = "2"
 ```
 
 Public data commands do not require OKX credentials.

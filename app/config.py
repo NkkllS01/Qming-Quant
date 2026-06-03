@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Settings(BaseModel):
@@ -11,7 +11,7 @@ class Settings(BaseModel):
     okx_secret_key: str | None = None
     okx_passphrase: str | None = None
     database_url: str = "sqlite:///trade.db"
-    default_symbols: list[str] = ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+    default_symbols: list[str] = Field(default_factory=lambda: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"])
     max_risk_per_trade: Decimal = Decimal("0.005")
     max_daily_loss: Decimal = Decimal("0.03")
     max_total_drawdown_pause: Decimal = Decimal("0.08")
@@ -25,5 +25,46 @@ class Settings(BaseModel):
             okx_secret_key=os.getenv("OKX_SECRET_KEY"),
             okx_passphrase=os.getenv("OKX_PASSPHRASE"),
             database_url=os.getenv("DATABASE_URL", "sqlite:///trade.db"),
+            default_symbols=_env_symbols("DEFAULT_SYMBOLS", ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]),
+            max_risk_per_trade=_env_decimal("MAX_RISK_PER_TRADE", Decimal("0.005")),
+            max_daily_loss=_env_decimal("MAX_DAILY_LOSS", Decimal("0.03")),
+            max_total_drawdown_pause=_env_decimal("MAX_TOTAL_DRAWDOWN_PAUSE", Decimal("0.08")),
+            max_leverage=_env_int("MAX_LEVERAGE", 3),
+            max_open_positions=_env_int("MAX_OPEN_POSITIONS", 2),
         )
 
+
+def _env_symbols(name: str, default: list[str]) -> list[str]:
+    value = os.getenv(name)
+    if value is None:
+        return list(default)
+    symbols = [symbol.strip() for symbol in value.split(",") if symbol.strip()]
+    if not symbols:
+        raise ValueError(f"{name} must contain at least one symbol")
+    return symbols
+
+
+def _env_decimal(name: str, default: Decimal) -> Decimal:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{name} must be a valid decimal") from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise ValueError(f"{name} must be a non-negative finite decimal")
+    return parsed
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a valid integer") from exc
+    if parsed < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return parsed

@@ -24,6 +24,12 @@ def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("OKX_SECRET_KEY", "secret")
     monkeypatch.setenv("OKX_PASSPHRASE", "passphrase")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///trade.db")
+    monkeypatch.setenv("DEFAULT_SYMBOLS", "BTC-USDT-SWAP,ETH-USDT-SWAP,SOL-USDT-SWAP")
+    monkeypatch.setenv("MAX_RISK_PER_TRADE", "0.004")
+    monkeypatch.setenv("MAX_DAILY_LOSS", "0.02")
+    monkeypatch.setenv("MAX_TOTAL_DRAWDOWN_PAUSE", "0.06")
+    monkeypatch.setenv("MAX_LEVERAGE", "2")
+    monkeypatch.setenv("MAX_OPEN_POSITIONS", "1")
 
     settings = Settings.from_env()
 
@@ -31,8 +37,34 @@ def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
     assert settings.okx_secret_key == "secret"
     assert settings.okx_passphrase == "passphrase"
     assert settings.database_url == "sqlite:///trade.db"
-    assert settings.default_symbols == ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
-    assert settings.max_risk_per_trade == Decimal("0.005")
+    assert settings.default_symbols == ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"]
+    assert settings.max_risk_per_trade == Decimal("0.004")
+    assert settings.max_daily_loss == Decimal("0.02")
+    assert settings.max_total_drawdown_pause == Decimal("0.06")
+    assert settings.max_leverage == 2
+    assert settings.max_open_positions == 1
+
+
+def test_settings_rejects_invalid_risk_environment_values(monkeypatch) -> None:
+    monkeypatch.setenv("MAX_DAILY_LOSS", "not-a-decimal")
+
+    try:
+        Settings.from_env()
+    except ValueError as exc:
+        assert "MAX_DAILY_LOSS must be a valid decimal" in str(exc)
+    else:
+        raise AssertionError("expected invalid MAX_DAILY_LOSS to be rejected")
+
+
+def test_settings_rejects_empty_default_symbols(monkeypatch) -> None:
+    monkeypatch.setenv("DEFAULT_SYMBOLS", ", ,")
+
+    try:
+        Settings.from_env()
+    except ValueError as exc:
+        assert "DEFAULT_SYMBOLS must contain at least one symbol" in str(exc)
+    else:
+        raise AssertionError("expected empty DEFAULT_SYMBOLS to be rejected")
 
 
 def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
