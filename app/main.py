@@ -29,6 +29,57 @@ class AppServices:
     trade_repository: TradeRepository | None = None
 
 
+@dataclass
+class DataGateResult:
+    status: str
+    reason: str
+    symbol: str
+    timeframe: str
+    candle_count: int
+    allow_gaps: bool
+    min_candles: int
+    missing_ranges_count: int = 0
+    first_missing: tuple[datetime, datetime] | None = None
+
+    def to_cli(self) -> str:
+        if self.status == "passed":
+            return (
+                f"data_gate status=passed symbol={self.symbol} timeframe={self.timeframe} "
+                f"actual_count={self.candle_count} min_candles={self.min_candles}"
+            )
+        if self.reason == "missing_candles" and self.first_missing is not None:
+            return (
+                f"data_gate status=blocked reason=missing_candles symbol={self.symbol} "
+                f"timeframe={self.timeframe} missing_ranges={self.missing_ranges_count} "
+                f"first_missing={self.first_missing[0].isoformat()}->{self.first_missing[1].isoformat()}"
+            )
+        if self.reason == "insufficient_candles":
+            return (
+                f"data_gate status=blocked reason=insufficient_candles symbol={self.symbol} "
+                f"timeframe={self.timeframe} actual_count={self.candle_count} "
+                f"min_candles={self.min_candles}"
+            )
+        return f"data_gate status=blocked reason={self.reason} symbol={self.symbol} timeframe={self.timeframe}"
+
+    def to_report(self) -> dict:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "candle_count": self.candle_count,
+            "allow_gaps": self.allow_gaps,
+            "min_candles": self.min_candles,
+            "missing_ranges": self.missing_ranges_count,
+            "first_missing": (
+                {
+                    "start": self.first_missing[0].isoformat(),
+                    "end": self.first_missing[1].isoformat(),
+                }
+                if self.first_missing is not None
+                else None
+            ),
+        }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="trade", description="OKX contract quant trading CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -175,15 +226,27 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         return f"synced {len(rates)} funding rates for {args.symbol}"
     if args.command == "backtest":
         candles = _list_command_candles(services, args.symbol, args.timeframe, args.start, args.end)
-        gate = _check_candle_data_gate(
+        gate = _evaluate_candle_data_gate(
             args.symbol,
             args.timeframe,
             candles,
             allow_gaps=args.allow_gaps,
             min_candles=args.min_candles,
         )
-        if gate is not None:
-            return gate
+        if gate.status == "blocked":
+            report_path = None
+            if args.report_json is not None:
+                report_path = Path(args.report_json)
+                _write_backtest_blocked_report(
+                    report_path,
+                    symbol=args.symbol,
+                    timeframe=args.timeframe,
+                    start=args.start,
+                    end=args.end,
+                    gate=gate,
+                )
+            suffix = f" report_json={report_path}" if report_path is not None else ""
+            return f"{gate.to_cli()}{suffix}"
         strategy = MultiTimeframeTrendStrategy(
             account_id="okx_sub_main",
             bot_id="okx_perp_bot_main",
@@ -212,6 +275,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
                 allow_gaps=args.allow_gaps,
                 min_candles=args.min_candles,
                 candle_count=len(candles),
+                gate=gate,
                 instrument=instrument,
                 result=result,
             )
@@ -259,15 +323,15 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         run_id = "cli-sim" if args.command == "sim-run" else "cli-paper"
         output_prefix = "sim_run" if args.command == "sim-run" else "paper_run"
         candles = _list_command_candles(services, args.symbol, args.timeframe, args.start, args.end)
-        gate = _check_candle_data_gate(
+        gate = _evaluate_candle_data_gate(
             args.symbol,
             args.timeframe,
             candles,
             allow_gaps=args.allow_gaps,
             min_candles=args.min_candles,
         )
-        if gate is not None:
-            return f"{output_prefix} {gate}"
+        if gate.status == "blocked":
+            return f"{output_prefix} {gate.to_cli()}"
         strategy = MultiTimeframeTrendStrategy(
             account_id="okx_sub_main",
             bot_id="okx_perp_bot_main",
@@ -330,6 +394,7 @@ def _write_backtest_report(
     allow_gaps: bool,
     min_candles: int,
     candle_count: int,
+    gate: DataGateResult,
     instrument: Instrument,
     result,
 ) -> None:
@@ -345,6 +410,7 @@ def _write_backtest_report(
             "allow_gaps": allow_gaps,
             "min_candles": min_candles,
         },
+        "data_gate": gate.to_report(),
         "instrument": {
             "tick_size": str(instrument.tick_size),
             "lot_size": str(instrument.lot_size),
@@ -355,6 +421,37 @@ def _write_backtest_report(
         "metrics": _json_ready(result.metrics.model_dump()),
         "trades": _json_ready([trade.model_dump() for trade in result.trades]),
         "equity_curve": _json_ready([point.model_dump() for point in result.equity_curve]),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_backtest_blocked_report(
+    path: Path,
+    *,
+    symbol: str,
+    timeframe: str,
+    start: str | None,
+    end: str | None,
+    gate: DataGateResult,
+) -> None:
+    report = {
+        "system": "Qiming Quant",
+        "command": "backtest",
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "status": "blocked",
+        "data_window": {
+            "start": start or "all",
+            "end": end or "all",
+            "candle_count": gate.candle_count,
+            "allow_gaps": gate.allow_gaps,
+            "min_candles": gate.min_candles,
+        },
+        "data_gate": gate.to_report(),
+        "metrics": None,
+        "trades": [],
+        "equity_curve": [],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -386,30 +483,58 @@ def _list_command_candles(
     return services.candle_repository.list_candles(symbol, timeframe, start=start_at, end=end_at)
 
 
-def _check_candle_data_gate(
+def _evaluate_candle_data_gate(
     symbol: str,
     timeframe: str,
     candles: list[Candle],
     *,
     allow_gaps: bool,
     min_candles: int,
-) -> str | None:
+) -> DataGateResult:
     if not candles:
-        return f"data_gate status=blocked reason=empty symbol={symbol} timeframe={timeframe}"
+        return DataGateResult(
+            status="blocked",
+            reason="empty",
+            symbol=symbol,
+            timeframe=timeframe,
+            candle_count=0,
+            allow_gaps=allow_gaps,
+            min_candles=min_candles,
+        )
     missing_ranges = find_missing_ranges(candles, timeframe)
     if missing_ranges and not allow_gaps:
         first_missing = missing_ranges[0]
-        return (
-            f"data_gate status=blocked reason=missing_candles symbol={symbol} timeframe={timeframe} "
-            f"missing_ranges={len(missing_ranges)} "
-            f"first_missing={first_missing[0].isoformat()}->{first_missing[1].isoformat()}"
+        return DataGateResult(
+            status="blocked",
+            reason="missing_candles",
+            symbol=symbol,
+            timeframe=timeframe,
+            candle_count=len(candles),
+            allow_gaps=allow_gaps,
+            min_candles=min_candles,
+            missing_ranges_count=len(missing_ranges),
+            first_missing=first_missing,
         )
     if len(candles) < min_candles:
-        return (
-            f"data_gate status=blocked reason=insufficient_candles symbol={symbol} timeframe={timeframe} "
-            f"actual_count={len(candles)} min_candles={min_candles}"
+        return DataGateResult(
+            status="blocked",
+            reason="insufficient_candles",
+            symbol=symbol,
+            timeframe=timeframe,
+            candle_count=len(candles),
+            allow_gaps=allow_gaps,
+            min_candles=min_candles,
         )
-    return None
+    return DataGateResult(
+        status="passed",
+        reason="ok",
+        symbol=symbol,
+        timeframe=timeframe,
+        candle_count=len(candles),
+        allow_gaps=allow_gaps,
+        min_candles=min_candles,
+        missing_ranges_count=len(missing_ranges),
+    )
 
 
 def _parse_cli_datetime(value: str) -> datetime:

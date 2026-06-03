@@ -112,6 +112,8 @@ Save a structured JSON backtest report:
 python -m app.main backtest --symbol BTC-USDT-SWAP --timeframe 15m --report-json reports/btc_15m_backtest.json
 ```
 
+When `--report-json` is provided, blocked backtests also write a JSON report with the data-gate reason, so batch research runs can track skipped windows.
+
 `backtest` blocks by default when local candles are empty, contain timestamp gaps, or have fewer than 30 candles. Use `candle-state` and `repair-missing` first. For research-only experiments where gaps are intentional, pass `--allow-gaps`. For quick smoke tests with shorter samples, pass `--min-candles`.
 
 When local instrument specs have been synced, `backtest` uses the stored tick size, lot size, and minimum size for order intent quantization. If specs are missing, it falls back to conservative defaults.

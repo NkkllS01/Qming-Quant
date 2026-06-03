@@ -586,11 +586,62 @@ def test_run_backtest_command_writes_json_report() -> None:
     assert report["data_window"]["start"] == "2024-01-01T00:00:00Z"
     assert report["data_window"]["end"] == "2024-01-01T14:45:00Z"
     assert report["data_window"]["candle_count"] == 60
+    assert report["data_gate"]["status"] == "passed"
+    assert report["data_gate"]["reason"] == "ok"
+    assert report["data_gate"]["candle_count"] == 60
     assert report["instrument"]["lot_size"] == "0.03"
     assert "total_trades" in report["metrics"]
     assert "final_equity" in report
     assert isinstance(report["trades"], list)
     assert isinstance(report["equity_curve"], list)
+
+
+def test_run_backtest_command_writes_blocked_json_report() -> None:
+    repo = CandleRepository("sqlite:///:memory:")
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    repo.upsert_many(
+        [
+            Candle(
+                symbol="BTC-USDT-SWAP",
+                timeframe="15m",
+                timestamp=start + timedelta(minutes=15 * i),
+                open=Decimal(99 + i),
+                high=Decimal(102 + i),
+                low=Decimal(98 + i),
+                close=Decimal(100 + i),
+                volume=Decimal("100"),
+                confirmed=True,
+            )
+            for i in range(2)
+        ]
+    )
+    report_path = Path(".pytest_cache") / "reports" / "blocked_bt.json"
+    services = AppServices(gateway=FakeGateway(), candle_repository=repo)
+    args = build_parser().parse_args(
+        [
+            "backtest",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--timeframe",
+            "15m",
+            "--report-json",
+            str(report_path),
+        ]
+    )
+
+    output = run_command(args, services)
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert "data_gate status=blocked" in output
+    assert f"report_json={report_path}" in output
+    assert report["status"] == "blocked"
+    assert report["symbol"] == "BTC-USDT-SWAP"
+    assert report["data_window"]["candle_count"] == 2
+    assert report["data_gate"]["status"] == "blocked"
+    assert report["data_gate"]["reason"] == "insufficient_candles"
+    assert report["metrics"] is None
+    assert report["trades"] == []
+    assert report["equity_curve"] == []
 
 
 def test_run_backtest_command_checks_gaps_inside_filtered_range() -> None:
