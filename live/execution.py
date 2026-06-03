@@ -13,12 +13,44 @@ from storage.live_repository import LiveStateRepository
 class LiveOrderExecutionResult:
     status: str
     intent: OrderIntent
-    trading_gate: TradingGateResult
+    trading_gate: TradingGateResult | None
     exchange_response: dict[str, Any] | None = None
+    reason: str = ""
 
     @property
     def submitted(self) -> bool:
         return self.status == "submitted"
+
+
+@dataclass(frozen=True)
+class LiveOrderPolicyResult:
+    approved: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class LiveOrderPolicy:
+    allowed_symbols: tuple[str, ...] = ("BTC-USDT-SWAP", "ETH-USDT-SWAP")
+    allowed_td_modes: tuple[str, ...] = ("isolated",)
+    allowed_order_types: tuple[str, ...] = ("market",)
+    allowed_position_actions: tuple[str, ...] = ("open", "close", "reduce")
+
+    def evaluate(self, intent: OrderIntent, *, td_mode: str) -> LiveOrderPolicyResult:
+        if intent.symbol not in self.allowed_symbols:
+            return LiveOrderPolicyResult(False, "symbol_not_allowed")
+        if td_mode not in self.allowed_td_modes:
+            return LiveOrderPolicyResult(False, "td_mode_not_allowed")
+        if intent.order_type not in self.allowed_order_types:
+            return LiveOrderPolicyResult(False, "order_type_not_allowed")
+        if intent.position_action not in self.allowed_position_actions:
+            return LiveOrderPolicyResult(False, "position_action_not_allowed")
+        if intent.size <= 0:
+            return LiveOrderPolicyResult(False, "size_must_be_positive")
+        if intent.position_action == "open" and intent.reduce_only:
+            return LiveOrderPolicyResult(False, "open_order_must_not_be_reduce_only")
+        if intent.position_action in {"close", "reduce"} and not intent.reduce_only:
+            return LiveOrderPolicyResult(False, "close_order_requires_reduce_only")
+        return LiveOrderPolicyResult(True, "order_policy_passed")
 
 
 @dataclass(frozen=True)
@@ -42,20 +74,31 @@ class LiveOrderExecutionService:
         gateway: object,
         trading_gate: TradingGateService,
         live_state_repository: LiveStateRepository | None = None,
+        order_policy: LiveOrderPolicy | None = None,
         td_mode: str = "isolated",
     ) -> None:
         self.gateway = gateway
         self.trading_gate = trading_gate
         self.live_state_repository = live_state_repository
+        self.order_policy = order_policy or LiveOrderPolicy()
         self.td_mode = td_mode
 
     def submit_order(self, intent: OrderIntent) -> LiveOrderExecutionResult:
+        policy_result = self.order_policy.evaluate(intent, td_mode=self.td_mode)
+        if not policy_result.approved:
+            return LiveOrderExecutionResult(
+                status="policy_rejected",
+                intent=intent,
+                trading_gate=None,
+                reason=policy_result.reason,
+            )
         gate_result = self.trading_gate.evaluate()
         if not gate_result.trading_allowed:
             return LiveOrderExecutionResult(
                 status="blocked",
                 intent=intent,
                 trading_gate=gate_result,
+                reason=gate_result.reason,
             )
         response = self.gateway.place_order(intent, td_mode=self.td_mode)
         if _is_exchange_rejection(response):
@@ -64,6 +107,7 @@ class LiveOrderExecutionService:
                 intent=intent,
                 trading_gate=gate_result,
                 exchange_response=response,
+                reason="exchange_rejected",
             )
         self._record_submitted_order(intent, response)
         return LiveOrderExecutionResult(
@@ -71,6 +115,7 @@ class LiveOrderExecutionService:
             intent=intent,
             trading_gate=gate_result,
             exchange_response=response,
+            reason="submitted",
         )
 
     def cancel_order(

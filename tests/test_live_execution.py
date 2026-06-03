@@ -22,6 +22,55 @@ def test_live_order_execution_blocks_when_trading_gate_blocks() -> None:
     assert gateway.placed == []
 
 
+def test_live_order_execution_rejects_symbol_outside_policy_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+    )
+
+    result = service.submit_order(_intent(symbol="SOL-USDT-SWAP"))
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "symbol_not_allowed"
+    assert result.trading_gate is None
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
+def test_live_order_execution_rejects_close_without_reduce_only_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+    )
+
+    result = service.submit_order(_intent(position_action="close", reduce_only=False))
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "close_order_requires_reduce_only"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
+def test_live_order_execution_rejects_limit_orders_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+    )
+
+    result = service.submit_order(_intent(order_type="limit", price=Decimal("70000")))
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "order_type_not_allowed"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
 def test_live_order_execution_places_order_when_gate_allows() -> None:
     gateway = FakeGateway()
     service = LiveOrderExecutionService(
@@ -36,6 +85,20 @@ def test_live_order_execution_places_order_when_gate_allows() -> None:
     assert result.submitted is True
     assert result.exchange_response == {"data": [{"ordId": "okx-1"}]}
     assert gateway.placed == [{"intent": _intent(), "td_mode": "isolated"}]
+
+
+def test_live_order_execution_allows_reduce_only_close_order() -> None:
+    gateway = FakeGateway()
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=FakeTradingGate(status="allowed"),
+    )
+    intent = _intent(position_action="close", side="sell", reduce_only=True)
+
+    result = service.submit_order(intent)
+
+    assert result.status == "submitted"
+    assert gateway.placed == [{"intent": intent, "td_mode": "isolated"}]
 
 
 def test_live_order_execution_records_submitted_order_snapshot() -> None:
@@ -224,19 +287,28 @@ class FakeTradingGate:
         )
 
 
-def _intent() -> OrderIntent:
+def _intent(
+    *,
+    symbol: str = "BTC-USDT-SWAP",
+    side: str = "buy",
+    position_action: str = "open",
+    order_type: str = "market",
+    size: Decimal = Decimal("0.1"),
+    price: Decimal | None = None,
+    reduce_only: bool = False,
+) -> OrderIntent:
     return OrderIntent(
         account_id="okx_sub_main",
         bot_id="okx_perp_bot_main",
         strategy_id="btc_trend_15m",
-        symbol="BTC-USDT-SWAP",
+        symbol=symbol,
         run_id="live",
-        side="buy",
-        position_action="open",
-        order_type="market",
-        size=Decimal("0.1"),
-        price=None,
-        reduce_only=False,
+        side=side,
+        position_action=position_action,
+        order_type=order_type,
+        size=size,
+        price=price,
+        reduce_only=reduce_only,
         client_order_id="client-1",
     )
 
