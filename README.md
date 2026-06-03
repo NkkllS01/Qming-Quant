@@ -191,6 +191,7 @@ python -m app.main live-order-check --symbol BTC-USDT-SWAP --side buy --position
 ```
 
 `live-order-check` builds an `OrderIntent` and evaluates the same local order policy and trading gate used by live execution, but it does not call OKX order placement. Invalid decimal inputs are rejected before policy checks, and market orders with `--price` are rejected by policy.
+When local instrument specs are configured, live order checks also require a synced live instrument row and verify `size` against OKX `minSz` and `lotSz` before the trading gate runs. Run `sync-instruments` before using live checks or live execution.
 
 Manual emergency controls:
 

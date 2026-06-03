@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from core.models import OrderIntent
+from core.models import Instrument, OrderIntent
 from live.execution import LiveOrderExecutionService
 from live.trading_gate import TradingGateResult
 from storage.live_repository import LiveStateRepository
+from storage.repositories import InstrumentRepository
 from storage.safety_repository import PauseState
 
 
@@ -85,6 +86,79 @@ def test_live_order_execution_rejects_market_order_with_price_before_gate() -> N
     assert result.reason == "market_order_must_not_have_price"
     assert trading_gate.evaluations == 0
     assert gateway.placed == []
+
+
+def test_live_order_execution_rejects_missing_instrument_spec_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+        instrument_repository=InstrumentRepository("sqlite:///:memory:"),
+    )
+
+    result = service.submit_order(_intent())
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "instrument_spec_missing"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
+def test_live_order_execution_rejects_size_below_instrument_minimum_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    _seed_instrument(instrument_repo, min_size=Decimal("0.1"), lot_size=Decimal("0.01"))
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+        instrument_repository=instrument_repo,
+    )
+
+    result = service.submit_order(_intent(size=Decimal("0.01")))
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "size_below_min_size"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
+def test_live_order_execution_rejects_size_not_matching_lot_size_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    _seed_instrument(instrument_repo, min_size=Decimal("0.01"), lot_size=Decimal("0.01"))
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+        instrument_repository=instrument_repo,
+    )
+
+    result = service.submit_order(_intent(size=Decimal("0.015")))
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "size_not_multiple_of_lot_size"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
+def test_live_order_execution_accepts_size_matching_local_instrument_spec() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    _seed_instrument(instrument_repo, min_size=Decimal("0.01"), lot_size=Decimal("0.01"))
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+        instrument_repository=instrument_repo,
+    )
+
+    result = service.submit_order(_intent(size=Decimal("0.1")))
+
+    assert result.status == "submitted"
+    assert trading_gate.evaluations == 1
+    assert gateway.placed == [{"intent": _intent(size=Decimal("0.1")), "td_mode": "isolated"}]
 
 
 def test_live_order_execution_check_order_allows_without_placing() -> None:
@@ -349,3 +423,24 @@ def _intent(
 
 def _seed_submitted_order(service: LiveOrderExecutionService) -> None:
     service._record_submitted_order(_intent(), {"data": [{"ordId": "okx-1"}]})
+
+
+def _seed_instrument(
+    repository: InstrumentRepository,
+    *,
+    min_size: Decimal,
+    lot_size: Decimal,
+    state: str = "live",
+) -> None:
+    repository.upsert_many(
+        [
+            Instrument(
+                symbol="BTC-USDT-SWAP",
+                inst_type="SWAP",
+                tick_size=Decimal("0.1"),
+                lot_size=lot_size,
+                min_size=min_size,
+                state=state,
+            )
+        ]
+    )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from core.models import Order, OrderIntent
@@ -34,6 +35,7 @@ class LiveOrderPolicy:
     allowed_td_modes: tuple[str, ...] = ("isolated",)
     allowed_order_types: tuple[str, ...] = ("market",)
     allowed_position_actions: tuple[str, ...] = ("open", "close", "reduce")
+    instrument_repository: object | None = None
 
     def evaluate(self, intent: OrderIntent, *, td_mode: str) -> LiveOrderPolicyResult:
         if intent.symbol not in self.allowed_symbols:
@@ -48,11 +50,30 @@ class LiveOrderPolicy:
             return LiveOrderPolicyResult(False, "position_action_not_allowed")
         if intent.size <= 0:
             return LiveOrderPolicyResult(False, "size_must_be_positive")
+        instrument_result = self._evaluate_instrument(intent)
+        if not instrument_result.approved:
+            return instrument_result
         if intent.position_action == "open" and intent.reduce_only:
             return LiveOrderPolicyResult(False, "open_order_must_not_be_reduce_only")
         if intent.position_action in {"close", "reduce"} and not intent.reduce_only:
             return LiveOrderPolicyResult(False, "close_order_requires_reduce_only")
         return LiveOrderPolicyResult(True, "order_policy_passed")
+
+    def _evaluate_instrument(self, intent: OrderIntent) -> LiveOrderPolicyResult:
+        if self.instrument_repository is None:
+            return LiveOrderPolicyResult(True, "instrument_policy_not_configured")
+        instrument = self.instrument_repository.get(intent.symbol)
+        if instrument is None:
+            return LiveOrderPolicyResult(False, "instrument_spec_missing")
+        if instrument.state != "live":
+            return LiveOrderPolicyResult(False, "instrument_not_live")
+        if intent.size < instrument.min_size:
+            return LiveOrderPolicyResult(False, "size_below_min_size")
+        if not _is_multiple(intent.size, instrument.lot_size):
+            return LiveOrderPolicyResult(False, "size_not_multiple_of_lot_size")
+        if intent.price is not None and not _is_multiple(intent.price, instrument.tick_size):
+            return LiveOrderPolicyResult(False, "price_not_multiple_of_tick_size")
+        return LiveOrderPolicyResult(True, "instrument_policy_passed")
 
 
 @dataclass(frozen=True)
@@ -90,12 +111,13 @@ class LiveOrderExecutionService:
         trading_gate: TradingGateService,
         live_state_repository: LiveStateRepository | None = None,
         order_policy: LiveOrderPolicy | None = None,
+        instrument_repository: object | None = None,
         td_mode: str = "isolated",
     ) -> None:
         self.gateway = gateway
         self.trading_gate = trading_gate
         self.live_state_repository = live_state_repository
-        self.order_policy = order_policy or LiveOrderPolicy()
+        self.order_policy = order_policy or LiveOrderPolicy(instrument_repository=instrument_repository)
         self.td_mode = td_mode
 
     def check_order(self, intent: OrderIntent) -> LiveOrderCheckResult:
@@ -282,3 +304,9 @@ def _is_exchange_rejection(response: dict[str, Any]) -> bool:
     row = _first_order_response(response)
     status_code = row.get("sCode")
     return status_code not in {None, "", "0", 0}
+
+
+def _is_multiple(value: Decimal, step: Decimal) -> bool:
+    if step <= 0:
+        return False
+    return value % step == 0

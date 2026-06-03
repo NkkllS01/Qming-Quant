@@ -1587,6 +1587,36 @@ def test_run_live_order_check_rejects_policy_before_gateway_reconciliation() -> 
     assert "trading_allowed=false" in output
 
 
+def test_run_live_order_check_rejects_missing_instrument_spec_before_gateway_reconciliation() -> None:
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        instrument_repository=InstrumentRepository("sqlite:///:memory:"),
+        live_state_repository=LiveStateRepository("sqlite:///:memory:"),
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+    args = build_parser().parse_args(
+        [
+            "live-order-check",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.1",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_order_check status=policy_rejected" in output
+    assert "reason=instrument_spec_missing" in output
+    assert "gate=not_checked" in output
+    assert "trading_allowed=false" in output
+
+
 def test_run_live_order_check_rejects_negative_size_by_policy() -> None:
     services = AppServices(
         gateway=FakeGateway(),
