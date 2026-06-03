@@ -120,6 +120,8 @@ class FakeGateway:
     def __init__(self) -> None:
         self.instrument_calls: list[str] = []
         self.candle_calls: list[dict] = []
+        self.rest_positions: list[dict] = []
+        self.rest_orders: list[dict] = []
         self.public_ws = OKXWebSocketClient(OKXWebSocketConfig())
         self.private_ws = OKXWebSocketClient(
             OKXWebSocketConfig(api_key="key", secret_key="secret", passphrase="pass")
@@ -195,6 +197,12 @@ class FakeGateway:
             )
             for i in range(limit)
         ]
+
+    def positions(self) -> dict:
+        return {"data": self.rest_positions}
+
+    def orders_pending(self) -> dict:
+        return {"data": self.rest_orders}
 
 
 def test_run_instruments_command_uses_gateway() -> None:
@@ -1166,6 +1174,51 @@ def test_run_live_sync_command_rejects_conflicting_modes() -> None:
         raise AssertionError("expected conflicting live-sync modes to be rejected")
 
 
+def test_run_live_reconcile_command_reports_clean_snapshot() -> None:
+    gateway = FakeGateway()
+    gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.1"}]
+    gateway.rest_orders = [{"ordId": "okx-1"}]
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    live_store = _live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    live_repo.save_snapshot(account_id="okx_sub_main", store=live_store)
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=live_repo,
+    )
+    args = build_parser().parse_args(["live-reconcile", "--account-id", "okx_sub_main"])
+
+    output = run_command(args, services)
+
+    assert output == (
+        "live_reconcile status=clean position_issues=0 "
+        "missing_orders_on_exchange=0 missing_orders_locally=0 trading_allowed=true"
+    )
+
+
+def test_run_live_reconcile_command_blocks_on_snapshot_mismatch() -> None:
+    gateway = FakeGateway()
+    gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "short", "pos": "-0.2"}]
+    gateway.rest_orders = [{"ordId": "exchange-only"}]
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    live_store = _live_store_with_position_and_order(order_id="local-only", direction="long", size="0.1")
+    live_repo.save_snapshot(account_id="okx_sub_main", store=live_store)
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=live_repo,
+    )
+    args = build_parser().parse_args(["live-reconcile"])
+
+    output = run_command(args, services)
+
+    assert "live_reconcile status=blocked" in output
+    assert "position_issues=2" in output
+    assert "missing_orders_on_exchange=1" in output
+    assert "missing_orders_locally=1" in output
+    assert "trading_allowed=false" in output
+
+
 class FakeWebSocketSession:
     def __init__(self, messages: list[dict]) -> None:
         self.messages = list(messages)
@@ -1194,3 +1247,40 @@ class FakeWebSocketConnector:
         if not self.sessions:
             raise ConnectionError("no sessions")
         return self.sessions.pop(0)
+
+
+def _live_store_with_position_and_order(*, order_id: str, direction: str, size: str):
+    from core.models import Order, Position
+    from live.state import LiveStateStore
+
+    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    store = LiveStateStore()
+    store.upsert_position(
+        Position(
+            account_id="okx_sub_main",
+            symbol="BTC-USDT-SWAP",
+            direction=direction,
+            size=Decimal(size),
+            entry_price=Decimal("70000"),
+            mark_price=Decimal("70100"),
+            updated_at=timestamp,
+        )
+    )
+    store.upsert_order(
+        Order(
+            account_id="okx_sub_main",
+            bot_id="live_sync",
+            strategy_id="exchange_sync",
+            symbol="BTC-USDT-SWAP",
+            run_id="live",
+            order_id=order_id,
+            client_order_id=order_id,
+            side="buy",
+            order_type="limit",
+            size=Decimal("0.1"),
+            status="live",
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+    )
+    return store

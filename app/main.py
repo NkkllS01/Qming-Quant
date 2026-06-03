@@ -14,6 +14,7 @@ from core.models import Candle, Instrument
 from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig, WebsocketsConnector
+from live.reconcile import LiveReconciliationService
 from live.sync import LiveSyncService
 from market_data.candle_sync import CandleSyncService
 from market_data.candles import find_missing_ranges
@@ -157,6 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
     live_sync.add_argument("--max-messages", type=int, default=1)
     live_sync.add_argument("--public-only", action="store_true")
     live_sync.add_argument("--private-only", action="store_true")
+
+    live_reconcile = subparsers.add_parser("live-reconcile", help="Compare local live snapshot with OKX REST state")
+    live_reconcile.add_argument("--account-id", default="okx_sub_main")
 
     return parser
 
@@ -437,6 +441,22 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"orders={result.orders_count} "
             f"persisted={str(result.persisted).lower()} "
             f"trading_enabled={str(result.trading_enabled).lower()}"
+        )
+    if args.command == "live-reconcile":
+        if services.live_state_repository is None:
+            raise RuntimeError("Live state repository is not configured")
+        service = LiveReconciliationService(
+            gateway=services.gateway,
+            repository=services.live_state_repository,
+            account_id=args.account_id,
+        )
+        result = service.run()
+        return (
+            f"live_reconcile status={result.status} "
+            f"position_issues={len(result.positions_issues)} "
+            f"missing_orders_on_exchange={len(result.missing_orders_on_exchange)} "
+            f"missing_orders_locally={len(result.missing_orders_locally)} "
+            f"trading_allowed={str(result.is_clean).lower()}"
         )
     raise ValueError(f"Unsupported command: {args.command}")
 

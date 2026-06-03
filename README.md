@@ -150,6 +150,14 @@ python -m app.main live-sync --symbol BTC-USDT-SWAP --max-messages 1 --public-on
 
 `live-sync` wires the OKX WebSocket runtime, network adapter, live state handler, and live state repository together. It can update and persist ticker, balance, position, and order snapshots, but it does not place or cancel orders. Use `--public-only` for market-data smoke tests before running private account subscriptions.
 
+Compare the local live snapshot with OKX REST state:
+
+```powershell
+python -m app.main live-reconcile --account-id okx_sub_main
+```
+
+`live-reconcile` checks local positions and pending order IDs against OKX REST responses. A non-clean report is treated as fail-closed: `trading_allowed=false`.
+
 The current backtest engine supports a single-position K-line lifecycle with:
 
 - Entry from strategy `Signal`
