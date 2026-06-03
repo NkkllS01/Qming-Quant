@@ -16,6 +16,7 @@ class LiveSyncResult:
     balances_count: int
     positions_count: int
     orders_count: int
+    fills_count: int
     persisted: bool = False
     trading_enabled: bool = False
 
@@ -86,6 +87,7 @@ class LiveSyncService:
             balances_count=len(self.store.balances),
             positions_count=len(self.store.positions),
             orders_count=len(self.store.orders),
+            fills_count=len(self.store.fills),
             persisted=persisted,
         )
 

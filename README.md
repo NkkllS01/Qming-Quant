@@ -147,7 +147,7 @@ Manually run read-only live state synchronization:
 python -m app.main live-sync --symbol BTC-USDT-SWAP --max-messages 1 --public-only
 ```
 
-`live-sync` wires the OKX WebSocket runtime, network adapter, live state handler, and live state repository together. It can update and persist ticker, balance, position, and order snapshots, but it does not place or cancel orders. Use `--public-only` for market-data smoke tests before running private account subscriptions.
+`live-sync` wires the OKX WebSocket runtime, network adapter, live state handler, and live state repository together. It can update and persist ticker, balance, position, order, and fill snapshots, but it does not place or cancel orders. Use `--public-only` for market-data smoke tests before running private account subscriptions.
 
 Compare the local live snapshot with OKX REST state:
 

@@ -459,6 +459,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"balances={result.balances_count} "
             f"positions={result.positions_count} "
             f"orders={result.orders_count} "
+            f"fills={result.fills_count} "
             f"persisted={str(result.persisted).lower()} "
             f"trading_enabled={str(result.trading_enabled).lower()}"
         )

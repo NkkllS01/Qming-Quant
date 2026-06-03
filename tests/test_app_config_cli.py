@@ -1075,7 +1075,17 @@ def test_run_live_sync_command_updates_public_and_private_state_summary() -> Non
                                 "ts": "1717200000000",
                             }
                         ],
-                    }
+                    },
+                    {
+                        "arg": {"channel": "tickers"},
+                        "data": [
+                            {
+                                "instId": "BTC-USDT-SWAP",
+                                "last": "70100",
+                                "ts": "1717200001000",
+                            }
+                        ],
+                    },
                 ]
             ),
             FakeWebSocketSession(
@@ -1094,7 +1104,30 @@ def test_run_live_sync_command_updates_public_and_private_state_summary() -> Non
                                 ],
                             }
                         ],
-                    }
+                    },
+                    {
+                        "arg": {"channel": "orders"},
+                        "data": [
+                            {
+                                "instId": "BTC-USDT-SWAP",
+                                "ordId": "okx-1",
+                                "clOrdId": "client-1",
+                                "tradeId": "trade-1",
+                                "side": "buy",
+                                "ordType": "market",
+                                "sz": "0.1",
+                                "accFillSz": "0.1",
+                                "fillSz": "0.04",
+                                "fillPx": "70100",
+                                "fillFee": "-0.12",
+                                "avgPx": "70100",
+                                "state": "filled",
+                                "fillTime": "1717200002000",
+                                "cTime": "1717200000000",
+                                "uTime": "1717200002000",
+                            }
+                        ],
+                    },
                 ]
             ),
         ]
@@ -1106,22 +1139,26 @@ def test_run_live_sync_command_updates_public_and_private_state_summary() -> Non
         live_state_repository=live_repo,
     )
     args = build_parser().parse_args(
-        ["live-sync", "--symbol", "BTC-USDT-SWAP", "--max-messages", "1"]
+        ["live-sync", "--symbol", "BTC-USDT-SWAP", "--max-messages", "2"]
     )
 
     output = run_command(args, services)
 
     assert "live_sync mode=both" in output
     assert "symbols=BTC-USDT-SWAP" in output
-    assert "public_messages=1" in output
-    assert "private_messages=1" in output
+    assert "public_messages=2" in output
+    assert "private_messages=2" in output
     assert "tickers=1" in output
     assert "balances=1" in output
+    assert "orders=1" in output
+    assert "fills=1" in output
     assert "persisted=true" in output
     assert "trading_enabled=false" in output
     restored = live_repo.load_snapshot(account_id="okx_sub_main")
-    assert restored.tickers["BTC-USDT-SWAP"].last_price == Decimal("70000")
+    assert restored.tickers["BTC-USDT-SWAP"].last_price == Decimal("70100")
     assert restored.balances["USDT"].equity == Decimal("1000")
+    assert restored.orders["okx-1"].status == "filled"
+    assert restored.fills["trade-1"].price == Decimal("70100")
     assert connector.urls == [
         "wss://ws.okx.com:8443/ws/v5/public",
         "wss://ws.okx.com:8443/ws/v5/private",
