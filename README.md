@@ -2,7 +2,7 @@
 
 Independent personal OKX USDT perpetual contract quant trading system.
 
-Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, a trading safety gate, and a gated live order execution service. There is intentionally no live order CLI yet.
+Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, a trading safety gate, and gated live order execution/cancellation services. There is intentionally no live order CLI yet.
 
 Design docs:
 
@@ -11,7 +11,7 @@ Design docs:
 
 ## Safety Boundary
 
-This project currently supports OKX market/account reads, local simulation/backtesting, live state persistence, reconciliation, emergency pause controls, and a gated internal live order execution service.
+This project currently supports OKX market/account reads, local simulation/backtesting, live state persistence, reconciliation, emergency pause controls, and gated internal live order execution/cancellation services.
 
 The OKX integration is organized as an API Gateway:
 
@@ -172,7 +172,7 @@ python -m app.main emergency-pause --reason operator_stop
 python -m app.main emergency-resume --reason operator_resume
 ```
 
-The codebase includes a minimal OKX REST order adapter and a live execution service that must pass the trading gate before calling OKX. Successful submissions are recorded into the local live order snapshot for restart recovery and reconciliation. If OKX returns a per-order rejection code, the service reports `exchange_rejected` and does not record a submitted local order. There is intentionally no live order CLI yet; live order placement should only be exposed after the gated execution path is reviewed with small-size constraints.
+The codebase includes a minimal OKX REST order adapter and a live execution service that must pass the trading gate before calling OKX. Successful submissions are recorded into the local live order snapshot for restart recovery and reconciliation. If OKX returns a per-order rejection code, the service reports `exchange_rejected` and does not record a submitted local order. The same service can request cancellation by OKX order id or client order id and marks matching local orders as `cancel_requested` when OKX accepts the request; cancel rejections do not modify local order state. There is intentionally no live order CLI yet; live order placement should only be exposed after the gated execution path is reviewed with small-size constraints.
 
 The current backtest engine supports a single-position K-line lifecycle with:
 

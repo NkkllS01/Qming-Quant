@@ -21,6 +21,20 @@ class LiveOrderExecutionResult:
         return self.status == "submitted"
 
 
+@dataclass(frozen=True)
+class LiveOrderCancellationResult:
+    status: str
+    account_id: str
+    symbol: str
+    order_id: str | None = None
+    client_order_id: str | None = None
+    exchange_response: dict[str, Any] | None = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.status == "cancel_requested"
+
+
 class LiveOrderExecutionService:
     def __init__(
         self,
@@ -59,6 +73,47 @@ class LiveOrderExecutionService:
             exchange_response=response,
         )
 
+    def cancel_order(
+        self,
+        *,
+        account_id: str,
+        symbol: str,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+    ) -> LiveOrderCancellationResult:
+        if order_id is None and client_order_id is None:
+            raise ValueError("cancel_order requires order_id or client_order_id")
+        response = self.gateway.cancel_order(
+            symbol=symbol,
+            order_id=order_id,
+            client_order_id=client_order_id,
+        )
+        if _is_exchange_rejection(response):
+            return LiveOrderCancellationResult(
+                status="cancel_rejected",
+                account_id=account_id,
+                symbol=symbol,
+                order_id=order_id,
+                client_order_id=client_order_id,
+                exchange_response=response,
+            )
+        exchange_order_id = _exchange_order_id(response) or order_id
+        exchange_client_order_id = _exchange_client_order_id(response) or client_order_id
+        self._record_cancel_requested(
+            account_id=account_id,
+            symbol=symbol,
+            order_id=exchange_order_id,
+            client_order_id=exchange_client_order_id,
+        )
+        return LiveOrderCancellationResult(
+            status="cancel_requested",
+            account_id=account_id,
+            symbol=symbol,
+            order_id=exchange_order_id,
+            client_order_id=exchange_client_order_id,
+            exchange_response=response,
+        )
+
     def _record_submitted_order(self, intent: OrderIntent, response: dict[str, Any]) -> None:
         if self.live_state_repository is None:
             return
@@ -86,6 +141,39 @@ class LiveOrderExecutionService:
         )
         self.live_state_repository.save_snapshot(account_id=intent.account_id, store=store)
 
+    def _record_cancel_requested(
+        self,
+        *,
+        account_id: str,
+        symbol: str,
+        order_id: str | None,
+        client_order_id: str | None,
+    ) -> None:
+        if self.live_state_repository is None:
+            return
+        store = self.live_state_repository.load_snapshot(account_id=account_id)
+        match_key = order_id or client_order_id
+        if match_key is None:
+            return
+        existing = store.orders.get(match_key)
+        if existing is None and client_order_id is not None:
+            existing = next(
+                (order for order in store.orders.values() if order.client_order_id == client_order_id),
+                None,
+            )
+        if existing is None:
+            return
+        if existing.symbol != symbol:
+            return
+        updated = existing.model_copy(
+            update={
+                "status": "cancel_requested",
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+        store.upsert_order(updated)
+        self.live_state_repository.save_snapshot(account_id=account_id, store=store)
+
 
 def _first_order_response(response: dict[str, Any]) -> dict[str, Any]:
     data = response.get("data")
@@ -96,6 +184,13 @@ def _first_order_response(response: dict[str, Any]) -> dict[str, Any]:
 
 def _exchange_order_id(response: dict[str, Any]) -> str | None:
     value = _first_order_response(response).get("ordId")
+    if value in {None, ""}:
+        return None
+    return str(value)
+
+
+def _exchange_client_order_id(response: dict[str, Any]) -> str | None:
+    value = _first_order_response(response).get("clOrdId")
     if value in {None, ""}:
         return None
     return str(value)
