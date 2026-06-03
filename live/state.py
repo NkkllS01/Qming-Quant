@@ -64,6 +64,16 @@ class LiveStateStore:
         self.last_event_at = order.updated_at
 
     def upsert_fill(self, fill: Fill) -> None:
+        existing = self.fills.get(fill.fill_id)
+        if existing is not None:
+            fill = fill.model_copy(
+                update={
+                    "account_id": existing.account_id,
+                    "bot_id": existing.bot_id,
+                    "strategy_id": existing.strategy_id,
+                    "run_id": existing.run_id,
+                }
+            )
         self.fills[fill.fill_id] = fill
         self.last_event_at = fill.created_at
 
@@ -201,12 +211,13 @@ class OKXLiveStateHandler:
                     updated_at=updated_at,
                 )
             )
+            order = self.store.orders[order_id]
             fill = _fill_from_order_row(
                 row,
-                account_id=self.account_id,
-                bot_id=self.bot_id,
-                strategy_id=self.strategy_id,
-                run_id=self.run_id,
+                account_id=order.account_id,
+                bot_id=order.bot_id,
+                strategy_id=order.strategy_id,
+                run_id=order.run_id,
                 symbol=symbol,
                 order_id=order_id,
             )

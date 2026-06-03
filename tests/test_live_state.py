@@ -1,7 +1,7 @@
 import asyncio
 from decimal import Decimal
 
-from core.models import Order
+from core.models import Fill, Order
 from live.state import AccountBalance, LiveStateStore, LiveTicker, OKXLiveStateHandler
 
 
@@ -297,6 +297,88 @@ def test_okx_live_state_handler_records_fill_from_order_update() -> None:
     asyncio.run(run())
 
 
+def test_okx_live_state_handler_records_fill_with_existing_order_lineage() -> None:
+    async def run() -> None:
+        store = LiveStateStore()
+        store.upsert_order(
+            Order(
+                account_id="okx_sub_main",
+                bot_id="okx_perp_bot_main",
+                strategy_id="btc_trend_15m",
+                symbol="BTC-USDT-SWAP",
+                run_id="live-run",
+                order_id="client-1",
+                client_order_id="client-1",
+                side="buy",
+                order_type="market",
+                size=Decimal("0.1"),
+                status="submitted",
+            )
+        )
+        handler = OKXLiveStateHandler(store, account_id="okx_sub_main")
+
+        await handler.handle(
+            {
+                "arg": {"channel": "orders"},
+                "data": [
+                    {
+                        "instId": "BTC-USDT-SWAP",
+                        "ordId": "okx-1",
+                        "clOrdId": "client-1",
+                        "tradeId": "trade-1",
+                        "side": "buy",
+                        "ordType": "market",
+                        "sz": "0.1",
+                        "accFillSz": "0.1",
+                        "fillSz": "0.1",
+                        "fillPx": "70100",
+                        "fillFee": "-0.12",
+                        "avgPx": "70100",
+                        "state": "filled",
+                        "fillTime": "1717200002000",
+                        "cTime": "1717200000000",
+                        "uTime": "1717200002000",
+                    }
+                ],
+            }
+        )
+
+        fill = store.fills["trade-1"]
+        assert fill.bot_id == "okx_perp_bot_main"
+        assert fill.strategy_id == "btc_trend_15m"
+        assert fill.run_id == "live-run"
+        assert "client-1" not in store.orders
+        assert store.orders["okx-1"].bot_id == "okx_perp_bot_main"
+
+    asyncio.run(run())
+
+
+def test_live_state_store_preserves_existing_fill_lineage_on_repeat_update() -> None:
+    store = LiveStateStore()
+    store.upsert_fill(
+        _fill(
+            fill_id="trade-1",
+            bot_id="okx_perp_bot_main",
+            strategy_id="btc_trend_15m",
+            run_id="live-run",
+        )
+    )
+
+    store.upsert_fill(
+        _fill(
+            fill_id="trade-1",
+            bot_id="live_sync",
+            strategy_id="exchange_sync",
+            run_id="live",
+        )
+    )
+
+    fill = store.fills["trade-1"]
+    assert fill.bot_id == "okx_perp_bot_main"
+    assert fill.strategy_id == "btc_trend_15m"
+    assert fill.run_id == "live-run"
+
+
 def test_okx_live_state_handler_ignores_unknown_or_malformed_messages() -> None:
     async def run() -> None:
         store = LiveStateStore()
@@ -310,3 +392,18 @@ def test_okx_live_state_handler_ignores_unknown_or_malformed_messages() -> None:
         assert store.snapshot()["orders"] == {}
 
     asyncio.run(run())
+
+
+def _fill(*, fill_id: str, bot_id: str, strategy_id: str, run_id: str):
+    return Fill(
+        account_id="okx_sub_main",
+        bot_id=bot_id,
+        strategy_id=strategy_id,
+        symbol="BTC-USDT-SWAP",
+        run_id=run_id,
+        fill_id=fill_id,
+        client_order_id="client-1",
+        side="buy",
+        size=Decimal("0.1"),
+        price=Decimal("70100"),
+    )
