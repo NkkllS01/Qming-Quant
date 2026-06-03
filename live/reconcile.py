@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from core.models import Order
 from execution.reconciliation import Reconciliation, ReconciliationIssue
 from storage.live_repository import LiveStateRepository
+
+ACTIVE_LOCAL_ORDER_STATUSES = {
+    "submitted",
+    "pending",
+    "live",
+    "partially_filled",
+    "cancel_requested",
+    "unknown",
+}
 
 
 @dataclass(frozen=True)
@@ -44,9 +55,9 @@ class LiveReconciliationService:
             list(local_store.positions.values()),
             exchange_positions,
         )
-        order_ids_report = self.reconciliation.compare_order_ids(
-            set(local_store.orders),
-            _normalize_okx_order_ids(self.gateway.orders_pending()),
+        order_ids_report = _compare_active_orders(
+            local_store.orders.values(),
+            _normalize_okx_order_identifiers(self.gateway.orders_pending()),
         )
         result = LiveReconcileResult(
             status="clean",
@@ -95,15 +106,58 @@ def _okx_position_direction(row: dict[str, Any]) -> str:
     return "short" if Decimal(str(raw_size)) < 0 else "long"
 
 
-def _normalize_okx_order_ids(payload: dict[str, Any]) -> set[str]:
+def _normalize_okx_order_identifiers(payload: dict[str, Any]) -> list[set[str]]:
     rows = payload.get("data", [])
     if not isinstance(rows, list):
-        return set()
-    order_ids: set[str] = set()
+        return []
+    order_identifiers: list[set[str]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
+        identifiers: set[str] = set()
         order_id = row.get("ordId") or row.get("order_id")
         if order_id:
-            order_ids.add(str(order_id))
-    return order_ids
+            identifiers.add(str(order_id))
+        client_order_id = row.get("clOrdId") or row.get("client_order_id")
+        if client_order_id:
+            identifiers.add(str(client_order_id))
+        if identifiers:
+            order_identifiers.append(identifiers)
+    return order_identifiers
+
+
+def _active_local_order_identifiers(orders: Iterable[Order]) -> list[tuple[str, set[str]]]:
+    order_identifiers: list[tuple[str, set[str]]] = []
+    for order in orders:
+        if order.status not in ACTIVE_LOCAL_ORDER_STATUSES:
+            continue
+        identifiers = {order.order_id}
+        if order.client_order_id:
+            identifiers.add(order.client_order_id)
+        order_identifiers.append((order.order_id, identifiers))
+    return order_identifiers
+
+
+def _compare_active_orders(
+    local_orders: Iterable[Order],
+    exchange_order_identifiers: list[set[str]],
+) -> dict[str, set[str]]:
+    local_order_identifiers = _active_local_order_identifiers(local_orders)
+    missing_on_exchange = {
+        order_id
+        for order_id, identifiers in local_order_identifiers
+        if not any(identifiers & exchange_identifiers for exchange_identifiers in exchange_order_identifiers)
+    }
+    missing_locally = {
+        _representative_order_identifier(exchange_identifiers)
+        for exchange_identifiers in exchange_order_identifiers
+        if not any(identifiers & exchange_identifiers for _, identifiers in local_order_identifiers)
+    }
+    return {
+        "missing_on_exchange": missing_on_exchange,
+        "missing_locally": missing_locally,
+    }
+
+
+def _representative_order_identifier(identifiers: set[str]) -> str:
+    return sorted(identifiers)[0]

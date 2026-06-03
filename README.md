@@ -155,7 +155,7 @@ Compare the local live snapshot with OKX REST state:
 python -m app.main live-reconcile --account-id okx_sub_main
 ```
 
-`live-reconcile` checks local positions and pending order IDs against OKX REST responses. A non-clean report is treated as fail-closed: `trading_allowed=false`.
+`live-reconcile` checks local positions and active pending orders against OKX REST responses. Terminal local orders such as filled or canceled orders are ignored for pending-order comparison, and active orders can match by either OKX order id or client order id. A non-clean report is treated as fail-closed: `trading_allowed=false`.
 
 Evaluate the live trading safety gate:
 
