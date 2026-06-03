@@ -17,12 +17,14 @@ class OKXRestClient:
         secret_key: str | None = None,
         passphrase: str | None = None,
         base_url: str = "https://www.okx.com",
+        simulated_trading: bool = False,
         timeout: float = 10.0,
     ) -> None:
         self.api_key = api_key
         self.secret_key = secret_key
         self.passphrase = passphrase
         self.base_url = base_url.rstrip("/")
+        self.simulated_trading = simulated_trading
         self.timeout = timeout
 
     def _timestamp(self) -> str:
@@ -30,6 +32,8 @@ class OKXRestClient:
 
     def _headers(self, method: str, request_path: str, body: str = "") -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
+        if self.simulated_trading:
+            headers["x-simulated-trading"] = "1"
         if self.api_key and self.secret_key and self.passphrase:
             timestamp = self._timestamp()
             headers.update(

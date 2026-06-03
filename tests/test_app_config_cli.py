@@ -29,6 +29,8 @@ def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("OKX_API_KEY", "key")
     monkeypatch.setenv("OKX_SECRET_KEY", "secret")
     monkeypatch.setenv("OKX_PASSPHRASE", "passphrase")
+    monkeypatch.setenv("OKX_BASE_URL", "https://www.okx.com")
+    monkeypatch.setenv("OKX_SIMULATED_TRADING", "1")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///trade.db")
     monkeypatch.setenv("DEFAULT_SYMBOLS", "BTC-USDT-SWAP,ETH-USDT-SWAP,SOL-USDT-SWAP")
     monkeypatch.setenv("MAX_RISK_PER_TRADE", "0.004")
@@ -43,6 +45,8 @@ def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
     assert settings.okx_api_key == "key"
     assert settings.okx_secret_key == "secret"
     assert settings.okx_passphrase == "passphrase"
+    assert settings.okx_base_url == "https://www.okx.com"
+    assert settings.okx_simulated_trading is True
     assert settings.database_url == "sqlite:///trade.db"
     assert settings.default_symbols == ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"]
     assert settings.max_risk_per_trade == Decimal("0.004")

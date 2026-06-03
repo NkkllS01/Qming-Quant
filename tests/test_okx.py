@@ -306,6 +306,27 @@ def test_okx_rest_client_post_signs_compact_json_body(monkeypatch) -> None:
     assert captured["headers"]["OK-ACCESS-SIGN"] == expected_sign
 
 
+def test_okx_rest_client_adds_simulated_trading_header(monkeypatch) -> None:
+    captured: dict = {}
+    client = StaticTimestampRestClient(
+        api_key="key",
+        secret_key="secret",
+        passphrase="pass",
+        base_url="https://example.test",
+        simulated_trading=True,
+    )
+
+    def fake_post(url, *, content, headers, timeout):
+        captured.update({"headers": headers})
+        return FakeHttpResponse({"data": [{"ordId": "okx-1"}]})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    client.post("/api/v5/trade/order", {"instId": "BTC-USDT-SWAP"}, private=True)
+
+    assert captured["headers"]["x-simulated-trading"] == "1"
+
+
 def test_okx_gateway_places_order_from_order_intent() -> None:
     rest = FakeTradeRest()
     gateway = OKXGateway(rest)

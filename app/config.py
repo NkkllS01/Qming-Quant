@@ -10,6 +10,8 @@ class Settings(BaseModel):
     okx_api_key: str | None = None
     okx_secret_key: str | None = None
     okx_passphrase: str | None = None
+    okx_base_url: str = "https://www.okx.com"
+    okx_simulated_trading: bool = False
     database_url: str = "sqlite:///trade.db"
     default_symbols: list[str] = Field(default_factory=lambda: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"])
     max_risk_per_trade: Decimal = Decimal("0.005")
@@ -25,6 +27,8 @@ class Settings(BaseModel):
             okx_api_key=os.getenv("OKX_API_KEY"),
             okx_secret_key=os.getenv("OKX_SECRET_KEY"),
             okx_passphrase=os.getenv("OKX_PASSPHRASE"),
+            okx_base_url=os.getenv("OKX_BASE_URL", "https://www.okx.com"),
+            okx_simulated_trading=_env_bool("OKX_SIMULATED_TRADING", False),
             database_url=os.getenv("DATABASE_URL", "sqlite:///trade.db"),
             default_symbols=_env_symbols("DEFAULT_SYMBOLS", ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]),
             max_risk_per_trade=_env_decimal("MAX_RISK_PER_TRADE", Decimal("0.005")),
@@ -57,6 +61,18 @@ def _env_decimal(name: str, default: Decimal) -> Decimal:
     if not parsed.is_finite() or parsed < 0:
         raise ValueError(f"{name} must be a non-negative finite decimal")
     return parsed
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
 
 
 def _env_int(name: str, default: int) -> int:

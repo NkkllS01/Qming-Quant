@@ -2,7 +2,7 @@
 
 Independent personal OKX USDT perpetual contract quant trading system.
 
-Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, live equity risk gating, live fill persistence, and gated live order execution/cancellation services. There is intentionally no live order CLI yet.
+Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, live equity risk gating, live fill persistence, and gated live order execution/cancellation services. Phase 1 exposes a demo-only OKX place/cancel CLI.
 
 Design docs:
 
@@ -20,7 +20,7 @@ The OKX integration is organized as an API Gateway:
 
 Still intentionally not exposed:
 
-- A CLI command for live order placement
+- A CLI command for real-money live order placement
 - An always-on live trading loop
 - A production scheduler/daemon
 - Full private fill-event lifecycle reconciliation
@@ -48,6 +48,7 @@ Optional environment variables:
 $env:OKX_API_KEY = "..."
 $env:OKX_SECRET_KEY = "..."
 $env:OKX_PASSPHRASE = "..."
+$env:OKX_SIMULATED_TRADING = "1"
 $env:DATABASE_URL = "sqlite:///trade.db"
 $env:DEFAULT_SYMBOLS = "BTC-USDT-SWAP,ETH-USDT-SWAP"
 $env:MAX_RISK_PER_TRADE = "0.005"
@@ -59,6 +60,21 @@ $env:MAX_MARK_PRICE_AGE_SECONDS = "120"
 ```
 
 Public data commands do not require OKX credentials.
+
+Phase 1 OKX demo order CLI:
+
+```powershell
+python -m app.phase1_cli place --symbol BTC-USDT-SWAP --side buy --size 0.01 --client-order-id phase1-test
+python -m app.phase1_cli cancel --symbol BTC-USDT-SWAP --client-order-id phase1-test
+```
+
+The Phase 1 CLI requires `OKX_SIMULATED_TRADING=1` and refuses to run without OKX credentials.
+
+Phase 1 place/cancel verification script:
+
+```powershell
+python scripts/phase1_place_cancel_check.py
+```
 
 ## CLI
 
@@ -201,7 +217,7 @@ python -m app.main emergency-pause --reason operator_stop
 python -m app.main emergency-resume --reason operator_resume
 ```
 
-The codebase includes a minimal OKX REST order adapter and a live execution service that must pass local order policy and the trading gate before calling OKX. The default live order policy only allows BTC/ETH USDT swap market orders in isolated mode; open orders must not be reduce-only, while close/reduce orders must be reduce-only. Successful submissions are recorded into the local live order snapshot for restart recovery and reconciliation. If OKX returns a per-order rejection code, the service reports `exchange_rejected` and does not record a submitted local order. The same service can request cancellation by OKX order id or client order id and marks matching local orders as `cancel_requested` when OKX accepts the request; cancel rejections do not modify local order state. There is intentionally no live order CLI yet; live order placement should only be exposed after the gated execution path is reviewed with small-size constraints.
+The codebase includes a minimal OKX REST order adapter and a live execution service that must pass local order policy and the trading gate before calling OKX. The default live order policy only allows BTC/ETH USDT swap market orders in isolated mode; open orders must not be reduce-only, while close/reduce orders must be reduce-only. Successful submissions are recorded into the local live order snapshot for restart recovery and reconciliation. If OKX returns a per-order rejection code, the service reports `exchange_rejected` and does not record a submitted local order. The same service can request cancellation by OKX order id or client order id and marks matching local orders as `cancel_requested` when OKX accepts the request; cancel rejections do not modify local order state. There is intentionally no real-money live order CLI yet; Phase 1 order placement is demo-only and requires `OKX_SIMULATED_TRADING=1`.
 When OKX private WebSocket order updates arrive, the live state store preserves the original local `account_id`, `bot_id`, `strategy_id`, and `run_id` for matching `order_id` or `client_order_id`, so exchange lifecycle updates and derived fills do not erase strategy lineage.
 
 The current backtest engine supports a single-position K-line lifecycle with:
