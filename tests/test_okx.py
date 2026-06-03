@@ -13,6 +13,8 @@ from exchanges.okx.websocket import (
     OKXWebSocketClient,
     OKXWebSocketConfig,
     OKXWebSocketRuntime,
+    WebsocketsConnector,
+    WebsocketsSession,
 )
 
 
@@ -296,6 +298,65 @@ def test_okx_websocket_runtime_replays_subscriptions_after_reconnect() -> None:
     asyncio.run(run())
 
 
+def test_websockets_session_sends_and_receives_json_objects() -> None:
+    async def run() -> None:
+        raw = FakeRawWebSocket(['{"event":"subscribe"}'])
+        session = WebsocketsSession(raw)
+
+        await session.send_json({"op": "subscribe", "args": [{"channel": "tickers"}]})
+        received = await session.receive_json()
+        await session.close()
+
+        assert raw.sent == ['{"op":"subscribe","args":[{"channel":"tickers"}]}']
+        assert received == {"event": "subscribe"}
+        assert raw.closed is True
+
+    asyncio.run(run())
+
+
+def test_websockets_session_accepts_bytes_messages() -> None:
+    async def run() -> None:
+        raw = FakeRawWebSocket([b'{"event":"login"}'])
+        session = WebsocketsSession(raw)
+
+        assert await session.receive_json() == {"event": "login"}
+
+    asyncio.run(run())
+
+
+def test_websockets_session_rejects_non_object_messages() -> None:
+    async def run() -> None:
+        session = WebsocketsSession(FakeRawWebSocket(['["not-object"]']))
+
+        try:
+            await session.receive_json()
+        except ValueError as exc:
+            assert "JSON object" in str(exc)
+        else:
+            raise AssertionError("expected non-object websocket payload to be rejected")
+
+    asyncio.run(run())
+
+
+def test_websockets_connector_uses_injected_connect_factory() -> None:
+    async def run() -> None:
+        calls: list[str] = []
+        raw = FakeRawWebSocket(['{"event":"ready"}'])
+
+        async def connect(url: str) -> FakeRawWebSocket:
+            calls.append(url)
+            return raw
+
+        connector = WebsocketsConnector(connect_factory=connect)
+        session = await connector.connect("wss://example.test/ws")
+
+        assert calls == ["wss://example.test/ws"]
+        assert isinstance(session, WebsocketsSession)
+        assert await session.receive_json() == {"event": "ready"}
+
+    asyncio.run(run())
+
+
 class FakeRest:
     def __init__(self, rows_by_after: dict[str, list[list[str]]]) -> None:
         self.rows_by_after = rows_by_after
@@ -348,6 +409,24 @@ class FakeWebSocketConnector:
         if not self.sessions:
             raise ConnectionError("no session available")
         return self.sessions.pop(0)
+
+
+class FakeRawWebSocket:
+    def __init__(self, messages: list[str | bytes]) -> None:
+        self.messages = list(messages)
+        self.sent: list[str] = []
+        self.closed = False
+
+    async def send(self, message: str) -> None:
+        self.sent.append(message)
+
+    async def recv(self) -> str | bytes:
+        if not self.messages:
+            raise ConnectionError("no more raw messages")
+        return self.messages.pop(0)
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 def _okx_candle_row(timestamp: datetime, close: str) -> list[str]:

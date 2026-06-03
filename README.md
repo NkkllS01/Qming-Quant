@@ -16,13 +16,12 @@ This project currently supports read-only OKX API operations and local simulatio
 The OKX integration is organized as an API Gateway:
 
 - REST API: historical candles, instruments, funding rates, account queries, position queries, pending-order queries, and future REST reconciliation.
-- WebSocket API: public/private URL, private login message signing, subscribe/unsubscribe message construction, message dispatch, and reconnect subscription replay are implemented as a tested runtime skeleton. A real network adapter and always-on live loop are intentionally not started yet.
+- WebSocket API: public/private URL, private login message signing, subscribe/unsubscribe message construction, message dispatch, reconnect subscription replay, and a `websockets` network adapter are implemented as tested foundations. An always-on live sync loop is intentionally not started yet.
 
 Not implemented yet:
 
 - Real order placement
 - Real order cancellation
-- Real public/private WebSocket network adapter
 - Live public/private WebSocket order/fill/position sync
 - Live trading loop
 
@@ -220,6 +219,5 @@ The current local storage layer supports:
 4. Improve the starter strategy and backtest metrics.
 5. Add simulation loop.
 6. Add portfolio risk and reconciliation depth.
-7. Add real OKX WebSocket public/private network adapter.
-8. Add reconnecting live market/account state sync.
-9. Only then add small-size live order placement.
+7. Add reconnecting live market/account state sync.
+8. Only then add small-size live order placement.

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from collections.abc import Awaitable, Callable
+import json
 from typing import Any, Protocol
 
 from exchanges.okx.signer import sign_okx_request
@@ -26,6 +27,7 @@ class WebSocketConnector(Protocol):
 
 
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
+WebSocketConnectFactory = Callable[[str], Awaitable[Any]]
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,40 @@ class OKXWebSocketClient:
 
     def _timestamp(self) -> str:
         return str(int(datetime.now(timezone.utc).timestamp()))
+
+
+class WebsocketsSession:
+    def __init__(self, connection: Any) -> None:
+        self.connection = connection
+
+    async def send_json(self, message: dict[str, Any]) -> None:
+        await self.connection.send(json.dumps(message, separators=(",", ":")))
+
+    async def receive_json(self) -> dict[str, Any]:
+        raw = await self.connection.recv()
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("OKX WebSocket message must be a JSON object")
+        return payload
+
+    async def close(self) -> None:
+        await self.connection.close()
+
+
+class WebsocketsConnector:
+    def __init__(self, *, connect_factory: WebSocketConnectFactory | None = None) -> None:
+        self.connect_factory = connect_factory
+
+    async def connect(self, url: str) -> WebsocketsSession:
+        factory = self.connect_factory
+        if factory is None:
+            import websockets
+
+            factory = websockets.connect
+        connection = await factory(url)
+        return WebsocketsSession(connection)
 
 
 class OKXWebSocketRuntime:
