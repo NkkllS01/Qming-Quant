@@ -158,6 +158,21 @@ python -m app.main live-reconcile --account-id okx_sub_main
 
 `live-reconcile` checks local positions and pending order IDs against OKX REST responses. A non-clean report is treated as fail-closed: `trading_allowed=false`.
 
+Evaluate the live trading safety gate:
+
+```powershell
+python -m app.main trading-gate --account-id okx_sub_main
+```
+
+The gate is fail-closed: manual emergency pause blocks first, then REST reconciliation must be clean before `trading_allowed=true`.
+
+Manual emergency controls:
+
+```powershell
+python -m app.main emergency-pause --reason operator_stop
+python -m app.main emergency-resume --reason operator_resume
+```
+
 The current backtest engine supports a single-position K-line lifecycle with:
 
 - Entry from strategy `Signal`

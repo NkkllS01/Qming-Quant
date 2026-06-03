@@ -9,6 +9,7 @@ from core.models import Candle, FundingRate, Instrument
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
 from storage.live_repository import LiveStateRepository
 from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
+from storage.safety_repository import SafetyRepository
 from storage.trade_repository import TradeRepository
 
 
@@ -1213,6 +1214,96 @@ def test_run_live_reconcile_command_blocks_on_snapshot_mismatch() -> None:
     output = run_command(args, services)
 
     assert "live_reconcile status=blocked" in output
+    assert "position_issues=2" in output
+    assert "missing_orders_on_exchange=1" in output
+    assert "missing_orders_locally=1" in output
+    assert "trading_allowed=false" in output
+
+
+def test_run_emergency_pause_and_resume_commands_persist_manual_state() -> None:
+    safety_repo = SafetyRepository("sqlite:///:memory:")
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        safety_repository=safety_repo,
+    )
+
+    pause_output = run_command(
+        build_parser().parse_args(["emergency-pause", "--reason", "operator_stop"]),
+        services,
+    )
+    resume_output = run_command(
+        build_parser().parse_args(["emergency-resume", "--reason", "operator_resume"]),
+        services,
+    )
+
+    assert "emergency_pause account_id=okx_sub_main paused=true" in pause_output
+    assert "trading_allowed=false" in pause_output
+    assert "emergency_resume account_id=okx_sub_main paused=false" in resume_output
+    assert safety_repo.get_pause(account_id="okx_sub_main").paused is False
+
+
+def test_run_trading_gate_command_allows_clean_state() -> None:
+    gateway = FakeGateway()
+    gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.1"}]
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    live_repo.save_snapshot(
+        account_id="okx_sub_main",
+        store=_live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1"),
+    )
+    gateway.rest_orders = [{"ordId": "okx-1"}]
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=live_repo,
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+
+    output = run_command(build_parser().parse_args(["trading-gate"]), services)
+
+    assert "trading_gate status=allowed" in output
+    assert "reason=all_checks_passed" in output
+    assert "trading_allowed=true" in output
+
+
+def test_run_trading_gate_command_blocks_when_manually_paused() -> None:
+    safety_repo = SafetyRepository("sqlite:///:memory:")
+    safety_repo.set_pause(account_id="okx_sub_main", paused=True, reason="manual")
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=LiveStateRepository("sqlite:///:memory:"),
+        safety_repository=safety_repo,
+    )
+
+    output = run_command(build_parser().parse_args(["trading-gate"]), services)
+
+    assert "trading_gate status=blocked" in output
+    assert "reason=manual_pause" in output
+    assert "manual_paused=true" in output
+    assert "trading_allowed=false" in output
+
+
+def test_run_trading_gate_command_blocks_on_reconciliation_mismatch() -> None:
+    gateway = FakeGateway()
+    gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "short", "pos": "-0.2"}]
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    live_repo.save_snapshot(
+        account_id="okx_sub_main",
+        store=_live_store_with_position_and_order(order_id="local-only", direction="long", size="0.1"),
+    )
+    gateway.rest_orders = [{"ordId": "exchange-only"}]
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=live_repo,
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+
+    output = run_command(build_parser().parse_args(["trading-gate"]), services)
+
+    assert "trading_gate status=blocked" in output
+    assert "reason=reconciliation_blocked" in output
     assert "position_issues=2" in output
     assert "missing_orders_on_exchange=1" in output
     assert "missing_orders_locally=1" in output

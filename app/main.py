@@ -16,11 +16,13 @@ from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig, WebsocketsConnector
 from live.reconcile import LiveReconciliationService
 from live.sync import LiveSyncService
+from live.trading_gate import TradingGateService
 from market_data.candle_sync import CandleSyncService
 from market_data.candles import find_missing_ranges
 from paper.engine import PaperTradingEngine
 from storage.live_repository import LiveStateRepository
 from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
+from storage.safety_repository import SafetyRepository
 from storage.trade_repository import TradeRepository
 from strategies.examples.trend import MultiTimeframeTrendStrategy
 
@@ -34,6 +36,7 @@ class AppServices:
     trade_repository: TradeRepository | None = None
     websocket_connector: object | None = None
     live_state_repository: LiveStateRepository | None = None
+    safety_repository: SafetyRepository | None = None
 
 
 @dataclass
@@ -162,6 +165,17 @@ def build_parser() -> argparse.ArgumentParser:
     live_reconcile = subparsers.add_parser("live-reconcile", help="Compare local live snapshot with OKX REST state")
     live_reconcile.add_argument("--account-id", default="okx_sub_main")
 
+    trading_gate = subparsers.add_parser("trading-gate", help="Evaluate live trading safety gate")
+    trading_gate.add_argument("--account-id", default="okx_sub_main")
+
+    emergency_pause = subparsers.add_parser("emergency-pause", help="Manually block live trading")
+    emergency_pause.add_argument("--account-id", default="okx_sub_main")
+    emergency_pause.add_argument("--reason", default="manual_emergency_pause")
+
+    emergency_resume = subparsers.add_parser("emergency-resume", help="Clear manual live trading pause")
+    emergency_resume.add_argument("--account-id", default="okx_sub_main")
+    emergency_resume.add_argument("--reason", default="manual_resume")
+
     return parser
 
 
@@ -188,6 +202,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         trade_repository=TradeRepository(settings.database_url),
         websocket_connector=WebsocketsConnector(),
         live_state_repository=LiveStateRepository(settings.database_url),
+        safety_repository=SafetyRepository(settings.database_url),
     )
 
 
@@ -457,6 +472,60 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"missing_orders_on_exchange={len(result.missing_orders_on_exchange)} "
             f"missing_orders_locally={len(result.missing_orders_locally)} "
             f"trading_allowed={str(result.is_clean).lower()}"
+        )
+    if args.command == "emergency-pause":
+        if services.safety_repository is None:
+            raise RuntimeError("Safety repository is not configured")
+        state = services.safety_repository.set_pause(
+            account_id=args.account_id,
+            paused=True,
+            reason=args.reason,
+        )
+        return (
+            f"emergency_pause account_id={state.account_id} paused={str(state.paused).lower()} "
+            f"reason={state.reason} trading_allowed=false"
+        )
+    if args.command == "emergency-resume":
+        if services.safety_repository is None:
+            raise RuntimeError("Safety repository is not configured")
+        state = services.safety_repository.set_pause(
+            account_id=args.account_id,
+            paused=False,
+            reason=args.reason,
+        )
+        return (
+            f"emergency_resume account_id={state.account_id} paused={str(state.paused).lower()} "
+            f"reason={state.reason}"
+        )
+    if args.command == "trading-gate":
+        if services.live_state_repository is None:
+            raise RuntimeError("Live state repository is not configured")
+        if services.safety_repository is None:
+            raise RuntimeError("Safety repository is not configured")
+        reconciliation = LiveReconciliationService(
+            gateway=services.gateway,
+            repository=services.live_state_repository,
+            account_id=args.account_id,
+        )
+        result = TradingGateService(
+            reconciliation=reconciliation,
+            safety_repository=services.safety_repository,
+            account_id=args.account_id,
+        ).evaluate()
+        position_issues = len(result.reconciliation.positions_issues) if result.reconciliation is not None else 0
+        missing_orders_on_exchange = (
+            len(result.reconciliation.missing_orders_on_exchange) if result.reconciliation is not None else 0
+        )
+        missing_orders_locally = (
+            len(result.reconciliation.missing_orders_locally) if result.reconciliation is not None else 0
+        )
+        return (
+            f"trading_gate status={result.status} reason={result.reason} "
+            f"manual_paused={str(result.pause_state.paused).lower()} "
+            f"position_issues={position_issues} "
+            f"missing_orders_on_exchange={missing_orders_on_exchange} "
+            f"missing_orders_locally={missing_orders_locally} "
+            f"trading_allowed={str(result.trading_allowed).lower()}"
         )
     raise ValueError(f"Unsupported command: {args.command}")
 
