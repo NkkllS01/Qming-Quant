@@ -1,12 +1,14 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from core.models import Position
+from core.models import MarkPrice, Position
+from live.market_data_guard import LiveMarketDataGuard
 from live.reconcile import LiveReconciliationService
 from live.risk import LiveEquityRiskGuard
 from live.state import AccountBalance, LiveStateStore
 from live.trading_gate import TradingGateService
 from storage.live_repository import LiveStateRepository
+from storage.repositories import MarkPriceRepository
 from storage.safety_repository import EquityRiskState, SafetyRepository
 
 
@@ -117,6 +119,104 @@ def test_trading_gate_blocks_on_equity_risk_before_reconciliation() -> None:
     assert result.reason == "daily_loss_limit_reached"
     assert result.equity_risk is not None
     assert result.reconciliation is None
+
+
+def test_live_market_data_guard_blocks_missing_mark_price() -> None:
+    repo = MarkPriceRepository("sqlite:///:memory:")
+
+    result = LiveMarketDataGuard(
+        mark_price_repository=repo,
+        symbols=["BTC-USDT-SWAP"],
+        now=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    ).evaluate()
+
+    assert result.status == "blocked"
+    assert result.reason == "missing_mark_price"
+    assert result.missing_symbols == ("BTC-USDT-SWAP",)
+    assert result.trading_allowed is False
+
+
+def test_live_market_data_guard_blocks_stale_mark_price() -> None:
+    repo = MarkPriceRepository("sqlite:///:memory:")
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    repo.upsert_many(
+        [
+            MarkPrice(
+                symbol="BTC-USDT-SWAP",
+                mark_price=Decimal("70000"),
+                updated_at=now - timedelta(seconds=121),
+            )
+        ]
+    )
+
+    result = LiveMarketDataGuard(
+        mark_price_repository=repo,
+        symbols=["BTC-USDT-SWAP"],
+        max_mark_price_age_seconds=120,
+        now=now,
+    ).evaluate()
+
+    assert result.status == "blocked"
+    assert result.reason == "stale_mark_price"
+    assert result.stale_symbols == ("BTC-USDT-SWAP",)
+
+
+def test_trading_gate_checks_market_data_before_reconciliation() -> None:
+    safety_repo = SafetyRepository("sqlite:///:memory:")
+    gate = TradingGateService(
+        reconciliation=FailingReconciliation(),
+        safety_repository=safety_repo,
+        account_id="okx_sub_main",
+        market_data_guard=LiveMarketDataGuard(
+            mark_price_repository=MarkPriceRepository("sqlite:///:memory:"),
+            symbols=["BTC-USDT-SWAP"],
+            now=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        ),
+    )
+
+    result = gate.evaluate()
+
+    assert result.status == "blocked"
+    assert result.reason == "missing_mark_price"
+    assert result.market_data is not None
+    assert result.reconciliation is None
+
+
+def test_trading_gate_allows_fresh_market_data_before_clean_reconciliation() -> None:
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    safety_repo = SafetyRepository("sqlite:///:memory:")
+    mark_repo = MarkPriceRepository("sqlite:///:memory:")
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    mark_repo.upsert_many(
+        [
+            MarkPrice(
+                symbol="BTC-USDT-SWAP",
+                mark_price=Decimal("70000"),
+                updated_at=now,
+            )
+        ]
+    )
+    _save_local_position(live_repo, size="0.1", direction="long")
+    reconciliation = LiveReconciliationService(
+        gateway=FakeGateway(positions=[{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.1"}]),
+        repository=live_repo,
+        account_id="okx_sub_main",
+    )
+
+    result = TradingGateService(
+        reconciliation=reconciliation,
+        safety_repository=safety_repo,
+        account_id="okx_sub_main",
+        market_data_guard=LiveMarketDataGuard(
+            mark_price_repository=mark_repo,
+            symbols=["BTC-USDT-SWAP"],
+            now=now,
+        ),
+    ).evaluate()
+
+    assert result.status == "allowed"
+    assert result.market_data is not None
+    assert result.market_data.reason == "market_data_fresh"
 
 
 class FakeGateway:

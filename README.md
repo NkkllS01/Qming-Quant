@@ -55,6 +55,7 @@ $env:MAX_DAILY_LOSS = "0.03"
 $env:MAX_TOTAL_DRAWDOWN_PAUSE = "0.08"
 $env:MAX_LEVERAGE = "3"
 $env:MAX_OPEN_POSITIONS = "2"
+$env:MAX_MARK_PRICE_AGE_SECONDS = "120"
 ```
 
 Public data commands do not require OKX credentials.
@@ -181,7 +182,7 @@ Evaluate the live trading safety gate:
 python -m app.main trading-gate --account-id okx_sub_main
 ```
 
-The gate is fail-closed: manual emergency pause blocks first, then local USDT equity must be within the daily loss and total drawdown limits, then REST reconciliation must be clean before `trading_allowed=true`. Missing or invalid local equity snapshots block trading until a private live sync records account balances.
+The gate is fail-closed: manual emergency pause blocks first, then local USDT equity must be within the daily loss and total drawdown limits, then local mark-price snapshots must be fresh, then REST reconciliation must be clean before `trading_allowed=true`. Missing or invalid local equity snapshots block trading until a private live sync records account balances. Missing or stale mark-price snapshots block trading until `sync-mark-prices` refreshes them.
 
 Dry-run a live order intent without placing it:
 

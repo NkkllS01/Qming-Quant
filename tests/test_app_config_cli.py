@@ -36,6 +36,7 @@ def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("MAX_TOTAL_DRAWDOWN_PAUSE", "0.06")
     monkeypatch.setenv("MAX_LEVERAGE", "2")
     monkeypatch.setenv("MAX_OPEN_POSITIONS", "1")
+    monkeypatch.setenv("MAX_MARK_PRICE_AGE_SECONDS", "60")
 
     settings = Settings.from_env()
 
@@ -49,6 +50,7 @@ def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
     assert settings.max_total_drawdown_pause == Decimal("0.06")
     assert settings.max_leverage == 2
     assert settings.max_open_positions == 1
+    assert settings.max_mark_price_age_seconds == 60
 
 
 def test_settings_rejects_invalid_risk_environment_values(monkeypatch) -> None:
@@ -1490,6 +1492,31 @@ def test_run_trading_gate_command_blocks_without_equity_snapshot() -> None:
     assert "trading_gate status=blocked" in output
     assert "reason=missing_equity_snapshot" in output
     assert "equity_risk=missing_equity_snapshot" in output
+    assert "trading_allowed=false" in output
+
+
+def test_run_trading_gate_command_blocks_without_mark_price_snapshot() -> None:
+    gateway = FakeGateway()
+    gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.1"}]
+    gateway.rest_orders = [{"ordId": "okx-1"}]
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    store = live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    _add_usdt_balance(store)
+    live_repo.save_snapshot(account_id="okx_sub_main", store=store)
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=live_repo,
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+        mark_price_repository=MarkPriceRepository("sqlite:///:memory:"),
+        default_symbols=["BTC-USDT-SWAP"],
+    )
+
+    output = run_command(build_parser().parse_args(["trading-gate"]), services)
+
+    assert "trading_gate status=blocked" in output
+    assert "reason=missing_mark_price" in output
+    assert "market_data=missing_mark_price" in output
     assert "trading_allowed=false" in output
 
 

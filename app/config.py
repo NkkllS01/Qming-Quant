@@ -17,6 +17,7 @@ class Settings(BaseModel):
     max_total_drawdown_pause: Decimal = Decimal("0.08")
     max_leverage: int = 3
     max_open_positions: int = 2
+    max_mark_price_age_seconds: int = 120
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -31,6 +32,7 @@ class Settings(BaseModel):
             max_total_drawdown_pause=_env_decimal("MAX_TOTAL_DRAWDOWN_PAUSE", Decimal("0.08")),
             max_leverage=_env_int("MAX_LEVERAGE", 3),
             max_open_positions=_env_int("MAX_OPEN_POSITIONS", 2),
+            max_mark_price_age_seconds=_env_int("MAX_MARK_PRICE_AGE_SECONDS", 120),
         )
 
 

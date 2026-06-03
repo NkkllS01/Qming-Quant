@@ -15,6 +15,7 @@ from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig, WebsocketsConnector
 from live.execution import LiveOrderExecutionService
+from live.market_data_guard import LiveMarketDataGuard
 from live.reconcile import LiveReconciliationService
 from live.risk import LiveEquityRiskGuard
 from live.sync import LiveSyncService
@@ -49,6 +50,8 @@ class AppServices:
     safety_repository: SafetyRepository | None = None
     max_daily_loss: Decimal = Decimal("0.03")
     max_total_drawdown_pause: Decimal = Decimal("0.08")
+    default_symbols: list[str] | None = None
+    max_mark_price_age_seconds: int = 120
 
 
 @dataclass
@@ -240,6 +243,8 @@ def build_services(settings: Settings | None = None) -> AppServices:
         safety_repository=SafetyRepository(settings.database_url),
         max_daily_loss=settings.max_daily_loss,
         max_total_drawdown_pause=settings.max_total_drawdown_pause,
+        default_symbols=settings.default_symbols,
+        max_mark_price_age_seconds=settings.max_mark_price_age_seconds,
     )
 
 
@@ -564,11 +569,16 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             max_daily_loss=services.max_daily_loss,
             max_total_drawdown=services.max_total_drawdown_pause,
         )
+        market_data_guard = _build_market_data_guard(
+            services,
+            symbols=services.default_symbols or ["BTC-USDT-SWAP", "ETH-USDT-SWAP"],
+        )
         result = TradingGateService(
             reconciliation=reconciliation,
             safety_repository=services.safety_repository,
             account_id=args.account_id,
             equity_risk_guard=equity_risk_guard,
+            market_data_guard=market_data_guard,
         ).evaluate()
         position_issues = len(result.reconciliation.positions_issues) if result.reconciliation is not None else 0
         missing_orders_on_exchange = (
@@ -581,6 +591,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"trading_gate status={result.status} reason={result.reason} "
             f"manual_paused={str(result.pause_state.paused).lower()} "
             f"equity_risk={result.equity_risk.reason if result.equity_risk is not None else 'not_checked'} "
+            f"market_data={result.market_data.reason if result.market_data is not None else 'not_checked'} "
             f"position_issues={position_issues} "
             f"missing_orders_on_exchange={missing_orders_on_exchange} "
             f"missing_orders_locally={missing_orders_locally} "
@@ -622,15 +633,21 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             safety_repository=services.safety_repository,
             account_id=args.account_id,
             equity_risk_guard=equity_risk_guard,
+            market_data_guard=_build_market_data_guard(services, symbols=[args.symbol]),
         )
         result = LiveOrderExecutionService(
             gateway=services.gateway,
             trading_gate=gate,
         ).check_order(intent)
         gate_reason = result.trading_gate.reason if result.trading_gate is not None else "not_checked"
+        market_data_reason = (
+            result.trading_gate.market_data.reason
+            if result.trading_gate is not None and result.trading_gate.market_data is not None
+            else "not_checked"
+        )
         return (
             f"live_order_check status={result.status} reason={result.reason} "
-            f"policy={result.policy.reason} gate={gate_reason} "
+            f"policy={result.policy.reason} gate={gate_reason} market_data={market_data_reason} "
             f"symbol={intent.symbol} side={intent.side} action={intent.position_action} "
             f"order_type={intent.order_type} size={intent.size} reduce_only={str(intent.reduce_only).lower()} "
             f"trading_allowed={str(result.allowed).lower()}"
@@ -650,6 +667,16 @@ def _instrument_or_default(services: AppServices, symbol: str) -> Instrument:
         lot_size=Decimal("0.01"),
         min_size=Decimal("0.01"),
         state="unknown",
+    )
+
+
+def _build_market_data_guard(services: AppServices, *, symbols: list[str]) -> LiveMarketDataGuard | None:
+    if services.mark_price_repository is None:
+        return None
+    return LiveMarketDataGuard(
+        mark_price_repository=services.mark_price_repository,
+        symbols=symbols,
+        max_mark_price_age_seconds=services.max_mark_price_age_seconds,
     )
 
 
