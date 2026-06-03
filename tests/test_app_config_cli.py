@@ -125,7 +125,19 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
             "15m",
         ]
     )
-    sim_args = parser.parse_args(["sim-run", "--symbol", "BTC-USDT-SWAP", "--timeframe", "15m"])
+    sim_args = parser.parse_args(
+        [
+            "sim-run",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--timeframe",
+            "15m",
+            "--current-daily-loss",
+            "30",
+            "--current-drawdown",
+            "0.08",
+        ]
+    )
     paper_args = parser.parse_args(["paper-run", "--symbol", "BTC-USDT-SWAP", "--timeframe", "15m"])
     sync_instruments_args = parser.parse_args(["sync-instruments", "--inst-type", "SWAP"])
     sync_funding_args = parser.parse_args(
@@ -173,6 +185,8 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert sim_args.command == "sim-run"
     assert sim_args.symbol == "BTC-USDT-SWAP"
     assert sim_args.strategy == "trend"
+    assert sim_args.current_daily_loss == "30"
+    assert sim_args.current_drawdown == "0.08"
     assert paper_args.command == "paper-run"
     assert paper_args.symbol == "BTC-USDT-SWAP"
     assert sync_instruments_args.command == "sync-instruments"
@@ -1090,6 +1104,40 @@ def test_run_sim_run_command_can_use_ma_crossover_strategy() -> None:
     assert "signals=" in output
     assert "persisted=true" in output
     assert len(trade_repo.list_journal("cli-sim")) >= 1
+
+
+def test_run_sim_run_command_persists_daily_loss_risk_rejection() -> None:
+    repo = CandleRepository("sqlite:///:memory:")
+    trade_repo = TradeRepository("sqlite:///:memory:")
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    repo.upsert_many(_ma_crossover_candles(start))
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=repo,
+        trade_repository=trade_repo,
+    )
+    args = build_parser().parse_args(
+        [
+            "sim-run",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--timeframe",
+            "15m",
+            "--strategy",
+            "ma-crossover",
+            "--current-daily-loss",
+            "30",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "approved=0" in output
+    assert "fills=0" in output
+    assert "persisted=true" in output
+    journal = trade_repo.list_journal("cli-sim")
+    assert journal[-1].event_type == "risk_rejected"
+    assert journal[-1].message == "daily loss limit reached"
 
 
 def test_run_sim_run_command_blocks_missing_candles_by_default() -> None:

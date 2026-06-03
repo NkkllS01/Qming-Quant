@@ -48,6 +48,12 @@ Phase 2 local strategy-loop smoke test:
 python scripts/phase2_basic_strategy_loop_check.py
 ```
 
+Phase 3 local risk-controls smoke test:
+
+```powershell
+python scripts/phase3_risk_controls_check.py
+```
+
 Optional environment variables:
 
 ```powershell

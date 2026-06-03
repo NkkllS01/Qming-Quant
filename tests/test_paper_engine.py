@@ -67,6 +67,38 @@ def test_paper_trading_engine_records_risk_rejection() -> None:
     assert result.journal[-1].event_type == "risk_rejected"
 
 
+def test_paper_trading_engine_rejects_when_daily_loss_limit_is_reached() -> None:
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    candles = [_candle(start + timedelta(minutes=15 * i), Decimal(100 + i)) for i in range(2)]
+    engine = PaperTradingEngine(
+        initial_equity=Decimal("1000"),
+        current_daily_loss=Decimal("30"),
+    )
+
+    result = engine.run(OneShotLongStrategy(), candles)
+
+    assert result.approved_count == 0
+    assert result.fills_count == 0
+    assert result.journal[-1].event_type == "risk_rejected"
+    assert result.journal[-1].message == "daily loss limit reached"
+
+
+def test_paper_trading_engine_rejects_when_drawdown_pause_is_reached() -> None:
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    candles = [_candle(start + timedelta(minutes=15 * i), Decimal(100 + i)) for i in range(2)]
+    engine = PaperTradingEngine(
+        initial_equity=Decimal("1000"),
+        current_drawdown=Decimal("0.08"),
+    )
+
+    result = engine.run(OneShotLongStrategy(), candles)
+
+    assert result.approved_count == 0
+    assert result.fills_count == 0
+    assert result.journal[-1].event_type == "risk_rejected"
+    assert result.journal[-1].message == "drawdown pause reached"
+
+
 class OneShotLongStrategy:
     account_id = "okx_sub_main"
     bot_id = "okx_perp_bot_main"

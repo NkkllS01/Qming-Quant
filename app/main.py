@@ -54,6 +54,8 @@ class AppServices:
     max_total_drawdown_pause: Decimal = Decimal("0.08")
     default_symbols: list[str] | None = None
     max_mark_price_age_seconds: int = 120
+    max_risk_per_trade: Decimal = Decimal("0.005")
+    max_open_positions: int = 2
 
 
 @dataclass
@@ -164,6 +166,8 @@ def build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--start", default=None)
     sim.add_argument("--end", default=None)
     sim.add_argument("--strategy", default="trend", choices=["trend", "ma-crossover"])
+    sim.add_argument("--current-daily-loss", default="0")
+    sim.add_argument("--current-drawdown", default="0")
 
     paper = subparsers.add_parser("paper-run", help="Compatibility alias for sim-run")
     paper.add_argument("--symbol", default="BTC-USDT-SWAP")
@@ -173,6 +177,8 @@ def build_parser() -> argparse.ArgumentParser:
     paper.add_argument("--start", default=None)
     paper.add_argument("--end", default=None)
     paper.add_argument("--strategy", default="trend", choices=["trend", "ma-crossover"])
+    paper.add_argument("--current-daily-loss", default="0")
+    paper.add_argument("--current-drawdown", default="0")
 
     repair = subparsers.add_parser("repair-missing", help="Repair missing local candle ranges")
     repair.add_argument("--symbol", required=True)
@@ -248,6 +254,8 @@ def build_services(settings: Settings | None = None) -> AppServices:
         safety_repository=SafetyRepository(settings.database_url),
         max_daily_loss=settings.max_daily_loss,
         max_total_drawdown_pause=settings.max_total_drawdown_pause,
+        max_risk_per_trade=settings.max_risk_per_trade,
+        max_open_positions=settings.max_open_positions,
         default_symbols=settings.default_symbols,
         max_mark_price_age_seconds=settings.max_mark_price_age_seconds,
     )
@@ -452,6 +460,12 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         instrument = _instrument_or_default(services, args.symbol)
         result = PaperTradingEngine(
             initial_equity=Decimal("1000"),
+            max_risk_per_trade=services.max_risk_per_trade,
+            max_daily_loss=services.max_daily_loss,
+            max_total_drawdown_pause=services.max_total_drawdown_pause,
+            max_open_positions=services.max_open_positions,
+            current_daily_loss=_parse_cli_decimal(args.current_daily_loss, field_name="current-daily-loss"),
+            current_drawdown=_parse_cli_decimal(args.current_drawdown, field_name="current-drawdown"),
             tick_size=instrument.tick_size,
             lot_size=instrument.lot_size,
             min_size=instrument.min_size,
@@ -470,6 +484,8 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"start={args.start or 'all'} end={args.end or 'all'} "
             f"tick_size={instrument.tick_size} lot_size={instrument.lot_size} "
             f"min_size={instrument.min_size} "
+            f"max_risk_per_trade={services.max_risk_per_trade} "
+            f"max_open_positions={services.max_open_positions} "
             f"signals={result.signals_count} approved={result.approved_count} "
             f"rejected={result.rejected_count} fills={result.fills_count} "
             f"positions={result.positions_count} final_equity={result.final_equity} "
