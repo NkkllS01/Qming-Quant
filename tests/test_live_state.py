@@ -1,6 +1,7 @@
 import asyncio
 from decimal import Decimal
 
+from core.models import Order
 from live.state import AccountBalance, LiveStateStore, LiveTicker, OKXLiveStateHandler
 
 
@@ -155,6 +156,94 @@ def test_okx_live_state_handler_updates_orders_with_lineage() -> None:
         assert order.status == "partially_filled"
 
     asyncio.run(run())
+
+
+def test_live_state_store_preserves_order_lineage_on_exchange_update() -> None:
+    store = LiveStateStore()
+    store.upsert_order(
+        Order(
+            account_id="okx_sub_main",
+            bot_id="okx_perp_bot_main",
+            strategy_id="btc_trend_15m",
+            symbol="BTC-USDT-SWAP",
+            run_id="live-run",
+            order_id="okx-1",
+            client_order_id="client-1",
+            side="buy",
+            order_type="market",
+            size=Decimal("0.1"),
+            status="submitted",
+        )
+    )
+
+    store.upsert_order(
+        Order(
+            account_id="okx_sub_main",
+            bot_id="live_sync",
+            strategy_id="exchange_sync",
+            symbol="BTC-USDT-SWAP",
+            run_id="live",
+            order_id="okx-1",
+            client_order_id="client-1",
+            side="buy",
+            order_type="market",
+            size=Decimal("0.1"),
+            filled_size=Decimal("0.1"),
+            avg_fill_price=Decimal("70100"),
+            status="filled",
+        )
+    )
+
+    order = store.orders["okx-1"]
+    assert order.bot_id == "okx_perp_bot_main"
+    assert order.strategy_id == "btc_trend_15m"
+    assert order.run_id == "live-run"
+    assert order.status == "filled"
+    assert order.filled_size == Decimal("0.1")
+    assert order.avg_fill_price == Decimal("70100")
+
+
+def test_live_state_store_rekeys_order_when_exchange_order_id_arrives() -> None:
+    store = LiveStateStore()
+    store.upsert_order(
+        Order(
+            account_id="okx_sub_main",
+            bot_id="okx_perp_bot_main",
+            strategy_id="btc_trend_15m",
+            symbol="BTC-USDT-SWAP",
+            run_id="live-run",
+            order_id="client-1",
+            client_order_id="client-1",
+            side="buy",
+            order_type="market",
+            size=Decimal("0.1"),
+            status="submitted",
+        )
+    )
+
+    store.upsert_order(
+        Order(
+            account_id="okx_sub_main",
+            bot_id="live_sync",
+            strategy_id="exchange_sync",
+            symbol="BTC-USDT-SWAP",
+            run_id="live",
+            order_id="okx-1",
+            client_order_id="client-1",
+            side="buy",
+            order_type="market",
+            size=Decimal("0.1"),
+            status="live",
+            okx_order_id="okx-1",
+        )
+    )
+
+    assert "client-1" not in store.orders
+    order = store.orders["okx-1"]
+    assert order.bot_id == "okx_perp_bot_main"
+    assert order.strategy_id == "btc_trend_15m"
+    assert order.run_id == "live-run"
+    assert order.okx_order_id == "okx-1"
 
 
 def test_okx_live_state_handler_records_fill_from_order_update() -> None:

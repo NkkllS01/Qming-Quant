@@ -49,6 +49,17 @@ class LiveStateStore:
         self.last_event_at = position.updated_at
 
     def upsert_order(self, order: Order) -> None:
+        existing = self._find_existing_order(order)
+        if existing is not None:
+            self.orders.pop(existing.order_id, None)
+            order = order.model_copy(
+                update={
+                    "account_id": existing.account_id,
+                    "bot_id": existing.bot_id,
+                    "strategy_id": existing.strategy_id,
+                    "run_id": existing.run_id,
+                }
+            )
         self.orders[order.order_id] = order
         self.last_event_at = order.updated_at
 
@@ -65,6 +76,21 @@ class LiveStateStore:
             "fills": dict(self.fills),
             "last_event_at": self.last_event_at,
         }
+
+    def _find_existing_order(self, order: Order) -> Order | None:
+        existing = self.orders.get(order.order_id)
+        if existing is not None:
+            return existing
+        return next(
+            (
+                current
+                for current in self.orders.values()
+                if current.client_order_id
+                and order.client_order_id
+                and current.client_order_id == order.client_order_id
+            ),
+            None,
+        )
 
 
 class OKXLiveStateHandler:
