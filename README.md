@@ -42,6 +42,12 @@ Phase 1 acceptance smoke test:
 python -m pytest tests/test_phase1_cli.py -q
 ```
 
+Phase 2 local strategy-loop smoke test:
+
+```powershell
+python scripts/phase2_basic_strategy_loop_check.py
+```
+
 Optional environment variables:
 
 ```powershell
