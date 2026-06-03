@@ -12,6 +12,7 @@ from backtest.engine import BacktestEngine
 from core.models import Candle, Instrument
 from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.rest import OKXRestClient
+from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
 from market_data.candle_sync import CandleSyncService
 from market_data.candles import find_missing_ranges
 from paper.engine import PaperTradingEngine
@@ -155,8 +156,16 @@ def build_services(settings: Settings | None = None) -> AppServices:
         secret_key=settings.okx_secret_key,
         passphrase=settings.okx_passphrase,
     )
+    public_ws = OKXWebSocketClient(OKXWebSocketConfig())
+    private_ws = OKXWebSocketClient(
+        OKXWebSocketConfig(
+            api_key=settings.okx_api_key,
+            secret_key=settings.okx_secret_key,
+            passphrase=settings.okx_passphrase,
+        )
+    )
     return AppServices(
-        gateway=OKXGateway(rest),
+        gateway=OKXGateway(rest, public_ws=public_ws, private_ws=private_ws),
         candle_repository=CandleRepository(settings.database_url),
         instrument_repository=InstrumentRepository(settings.database_url),
         funding_rate_repository=FundingRateRepository(settings.database_url),

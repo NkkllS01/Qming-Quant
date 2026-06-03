@@ -5,11 +5,28 @@ from datetime import datetime
 from core.models import Candle, FundingRate, Instrument
 from exchanges.okx.mapper import map_funding_rate, map_instrument, map_okx_candles
 from exchanges.okx.rest import OKXRestClient
+from exchanges.okx.websocket import OKXWebSocketClient
 
 
 class OKXGateway:
-    def __init__(self, rest: OKXRestClient) -> None:
+    def __init__(
+        self,
+        rest: OKXRestClient,
+        *,
+        public_ws: OKXWebSocketClient | None = None,
+        private_ws: OKXWebSocketClient | None = None,
+    ) -> None:
         self.rest = rest
+        self.public_ws = public_ws
+        self.private_ws = private_ws
+
+    @property
+    def has_public_websocket(self) -> bool:
+        return self.public_ws is not None
+
+    @property
+    def has_private_websocket(self) -> bool:
+        return self.private_ws is not None
 
     def server_time(self) -> dict:
         return self.rest.get("/api/v5/public/time")

@@ -2,7 +2,7 @@
 
 Independent personal OKX USDT perpetual contract quant trading system.
 
-Current status: early development skeleton with data sync, local candle storage, strategy signal generation, risk checks, simulated fills, and a basic backtest path. Real order placement is intentionally not implemented yet.
+Current status: early development skeleton with OKX API Gateway foundations, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, and a basic backtest path. Real order placement is intentionally not implemented yet.
 
 Design docs:
 
@@ -13,11 +13,16 @@ Design docs:
 
 This project currently supports read-only OKX API operations and local simulation/backtesting.
 
+The OKX integration is organized as an API Gateway:
+
+- REST API: historical candles, instruments, funding rates, account queries, position queries, pending-order queries, and future REST reconciliation.
+- WebSocket API: public/private URL, private login message signing, and subscribe/unsubscribe message construction are implemented as a tested protocol layer. A live reconnecting WebSocket loop is intentionally not started yet.
+
 Not implemented yet:
 
 - Real order placement
 - Real order cancellation
-- Private WebSocket order/fill/position sync
+- Live public/private WebSocket order/fill/position sync
 - Live trading loop
 
 Do not add live trading until data sync, backtesting, simulation, risk checks, and reconciliation are verified.
@@ -214,4 +219,5 @@ The current local storage layer supports:
 4. Improve the starter strategy and backtest metrics.
 5. Add simulation loop.
 6. Add portfolio risk and reconciliation depth.
-7. Only then add small-size live order placement.
+7. Add reconnecting OKX WebSocket public/private runtime.
+8. Only then add small-size live order placement.
