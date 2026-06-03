@@ -8,7 +8,12 @@ from decimal import Decimal
 from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.mapper import map_funding_rate, map_instrument, map_okx_candles
 from exchanges.okx.signer import sign_okx_request
-from exchanges.okx.websocket import OKX_WS_VERIFY_PATH, OKXWebSocketClient, OKXWebSocketConfig
+from exchanges.okx.websocket import (
+    OKX_WS_VERIFY_PATH,
+    OKXWebSocketClient,
+    OKXWebSocketConfig,
+    OKXWebSocketRuntime,
+)
 
 
 def test_sign_okx_request_matches_hmac_sha256_base64() -> None:
@@ -195,6 +200,102 @@ def test_okx_gateway_exposes_configured_websocket_clients() -> None:
     assert gateway.private_ws is private_ws
 
 
+def test_okx_websocket_runtime_subscribes_and_dispatches_public_messages() -> None:
+    async def run() -> None:
+        received: list[dict] = []
+
+        async def on_message(message: dict) -> None:
+            received.append(message)
+
+        session = FakeWebSocketSession([{"arg": {"channel": "candle15m"}, "data": [{"c": "100"}]}])
+        connector = FakeWebSocketConnector([session])
+        runtime = OKXWebSocketRuntime(
+            OKXWebSocketClient(OKXWebSocketConfig()),
+            connector=connector,
+            channels=[{"channel": "candle15m", "instId": "BTC-USDT-SWAP"}],
+            on_message=on_message,
+        )
+
+        count = await runtime.run_once(max_messages=1)
+
+        assert count == 1
+        assert connector.urls == ["wss://ws.okx.com:8443/ws/v5/public"]
+        assert session.sent == [
+            {
+                "op": "subscribe",
+                "args": [{"channel": "candle15m", "instId": "BTC-USDT-SWAP"}],
+            }
+        ]
+        assert received == [{"arg": {"channel": "candle15m"}, "data": [{"c": "100"}]}]
+        assert session.closed is True
+
+    asyncio.run(run())
+
+
+def test_okx_websocket_runtime_logs_in_before_private_subscriptions() -> None:
+    async def run() -> None:
+        session = FakeWebSocketSession([{"event": "subscribe", "arg": {"channel": "positions"}}])
+        connector = FakeWebSocketConnector([session])
+        runtime = OKXWebSocketRuntime(
+            OKXWebSocketClient(
+                OKXWebSocketConfig(api_key="key", secret_key="secret", passphrase="pass")
+            ),
+            connector=connector,
+            private=True,
+            channels=[{"channel": "positions", "instType": "SWAP"}],
+        )
+
+        await runtime.run_once(max_messages=1)
+
+        assert connector.urls == ["wss://ws.okx.com:8443/ws/v5/private"]
+        assert session.sent[0]["op"] == "login"
+        assert session.sent[1] == {
+            "op": "subscribe",
+            "args": [{"channel": "positions", "instType": "SWAP"}],
+        }
+
+    asyncio.run(run())
+
+
+def test_okx_websocket_runtime_replays_subscriptions_after_reconnect() -> None:
+    async def run() -> None:
+        first = FakeWebSocketSession([], fail_on_receive=True)
+        second = FakeWebSocketSession([{"event": "subscribe", "arg": {"channel": "orders"}}])
+        connector = FakeWebSocketConnector([first, second])
+        delays: list[float] = []
+
+        async def sleep(delay: float) -> None:
+            delays.append(delay)
+
+        runtime = OKXWebSocketRuntime(
+            OKXWebSocketClient(
+                OKXWebSocketConfig(api_key="key", secret_key="secret", passphrase="pass")
+            ),
+            connector=connector,
+            private=True,
+            channels=[{"channel": "orders", "instType": "SWAP"}],
+        )
+
+        count = await runtime.run_with_reconnects(
+            max_reconnects=1,
+            max_messages_per_connection=1,
+            sleep=sleep,
+            reconnect_delay=0.5,
+        )
+
+        assert count == 1
+        assert delays == [0.5]
+        assert len(connector.urls) == 2
+        assert first.sent[0]["op"] == "login"
+        assert first.sent[1]["op"] == "subscribe"
+        assert second.sent[0]["op"] == "login"
+        assert second.sent[1]["op"] == "subscribe"
+        assert first.closed is True
+        assert second.closed is True
+
+    asyncio.run(run())
+
+
 class FakeRest:
     def __init__(self, rows_by_after: dict[str, list[list[str]]]) -> None:
         self.rows_by_after = rows_by_after
@@ -214,6 +315,39 @@ class FakeWebSocketSender:
 
     async def send_json(self, message: dict) -> None:
         self.messages.append(message)
+
+
+class FakeWebSocketSession:
+    def __init__(self, messages: list[dict], *, fail_on_receive: bool = False) -> None:
+        self.messages = list(messages)
+        self.fail_on_receive = fail_on_receive
+        self.sent: list[dict] = []
+        self.closed = False
+
+    async def send_json(self, message: dict) -> None:
+        self.sent.append(message)
+
+    async def receive_json(self) -> dict:
+        if self.fail_on_receive:
+            raise ConnectionError("disconnected")
+        if not self.messages:
+            raise ConnectionError("no more messages")
+        return self.messages.pop(0)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class FakeWebSocketConnector:
+    def __init__(self, sessions: list[FakeWebSocketSession]) -> None:
+        self.sessions = list(sessions)
+        self.urls: list[str] = []
+
+    async def connect(self, url: str) -> FakeWebSocketSession:
+        self.urls.append(url)
+        if not self.sessions:
+            raise ConnectionError("no session available")
+        return self.sessions.pop(0)
 
 
 def _okx_candle_row(timestamp: datetime, close: str) -> list[str]:
