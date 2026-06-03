@@ -10,10 +10,11 @@ from pathlib import Path
 
 from app.config import Settings
 from backtest.engine import BacktestEngine
-from core.models import Candle, Instrument
+from core.models import Candle, Instrument, OrderIntent
 from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig, WebsocketsConnector
+from live.execution import LiveOrderExecutionService
 from live.reconcile import LiveReconciliationService
 from live.risk import LiveEquityRiskGuard
 from live.sync import LiveSyncService
@@ -170,6 +171,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     trading_gate = subparsers.add_parser("trading-gate", help="Evaluate live trading safety gate")
     trading_gate.add_argument("--account-id", default="okx_sub_main")
+
+    live_order_check = subparsers.add_parser("live-order-check", help="Dry-run a live order intent without placing it")
+    live_order_check.add_argument("--account-id", default="okx_sub_main")
+    live_order_check.add_argument("--bot-id", default="okx_perp_bot_main")
+    live_order_check.add_argument("--strategy-id", default="manual_live_check")
+    live_order_check.add_argument("--symbol", required=True)
+    live_order_check.add_argument("--side", required=True, choices=["buy", "sell"])
+    live_order_check.add_argument("--position-action", required=True, choices=["open", "close", "reduce"])
+    live_order_check.add_argument("--order-type", default="market", choices=["market", "limit"])
+    live_order_check.add_argument("--size", required=True)
+    live_order_check.add_argument("--price", default=None)
+    live_order_check.add_argument("--reduce-only", action="store_true")
+    live_order_check.add_argument("--client-order-id", default="manual-live-check")
 
     emergency_pause = subparsers.add_parser("emergency-pause", help="Manually block live trading")
     emergency_pause.add_argument("--account-id", default="okx_sub_main")
@@ -541,6 +555,55 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"missing_orders_on_exchange={missing_orders_on_exchange} "
             f"missing_orders_locally={missing_orders_locally} "
             f"trading_allowed={str(result.trading_allowed).lower()}"
+        )
+    if args.command == "live-order-check":
+        if services.live_state_repository is None:
+            raise RuntimeError("Live state repository is not configured")
+        if services.safety_repository is None:
+            raise RuntimeError("Safety repository is not configured")
+        intent = OrderIntent(
+            account_id=args.account_id,
+            bot_id=args.bot_id,
+            strategy_id=args.strategy_id,
+            symbol=args.symbol,
+            run_id="live-check",
+            side=args.side,
+            position_action=args.position_action,
+            order_type=args.order_type,
+            size=Decimal(args.size),
+            price=Decimal(args.price) if args.price is not None else None,
+            reduce_only=args.reduce_only,
+            client_order_id=args.client_order_id,
+        )
+        reconciliation = LiveReconciliationService(
+            gateway=services.gateway,
+            repository=services.live_state_repository,
+            account_id=args.account_id,
+        )
+        equity_risk_guard = LiveEquityRiskGuard(
+            live_state_repository=services.live_state_repository,
+            safety_repository=services.safety_repository,
+            account_id=args.account_id,
+            max_daily_loss=services.max_daily_loss,
+            max_total_drawdown=services.max_total_drawdown_pause,
+        )
+        gate = TradingGateService(
+            reconciliation=reconciliation,
+            safety_repository=services.safety_repository,
+            account_id=args.account_id,
+            equity_risk_guard=equity_risk_guard,
+        )
+        result = LiveOrderExecutionService(
+            gateway=services.gateway,
+            trading_gate=gate,
+        ).check_order(intent)
+        gate_reason = result.trading_gate.reason if result.trading_gate is not None else "not_checked"
+        return (
+            f"live_order_check status={result.status} reason={result.reason} "
+            f"policy={result.policy.reason} gate={gate_reason} "
+            f"symbol={intent.symbol} side={intent.side} action={intent.position_action} "
+            f"order_type={intent.order_type} size={intent.size} reduce_only={str(intent.reduce_only).lower()} "
+            f"trading_allowed={str(result.allowed).lower()}"
         )
     raise ValueError(f"Unsupported command: {args.command}")
 

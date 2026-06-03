@@ -71,6 +71,24 @@ def test_live_order_execution_rejects_limit_orders_before_gate() -> None:
     assert gateway.placed == []
 
 
+def test_live_order_execution_check_order_allows_without_placing() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+    )
+
+    result = service.check_order(_intent())
+
+    assert result.status == "allowed"
+    assert result.reason == "order_check_passed"
+    assert result.policy.reason == "order_policy_passed"
+    assert result.trading_gate is not None
+    assert trading_gate.evaluations == 1
+    assert gateway.placed == []
+
+
 def test_live_order_execution_places_order_when_gate_allows() -> None:
     gateway = FakeGateway()
     service = LiveOrderExecutionService(

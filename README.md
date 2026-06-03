@@ -165,6 +165,14 @@ python -m app.main trading-gate --account-id okx_sub_main
 
 The gate is fail-closed: manual emergency pause blocks first, then local USDT equity must be within the daily loss and total drawdown limits, then REST reconciliation must be clean before `trading_allowed=true`. Missing or invalid local equity snapshots block trading until a private live sync records account balances.
 
+Dry-run a live order intent without placing it:
+
+```powershell
+python -m app.main live-order-check --symbol BTC-USDT-SWAP --side buy --position-action open --size 0.1
+```
+
+`live-order-check` builds an `OrderIntent` and evaluates the same local order policy and trading gate used by live execution, but it does not call OKX order placement.
+
 Manual emergency controls:
 
 ```powershell

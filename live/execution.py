@@ -54,6 +54,19 @@ class LiveOrderPolicy:
 
 
 @dataclass(frozen=True)
+class LiveOrderCheckResult:
+    status: str
+    reason: str
+    intent: OrderIntent
+    policy: LiveOrderPolicyResult
+    trading_gate: TradingGateResult | None = None
+
+    @property
+    def allowed(self) -> bool:
+        return self.status == "allowed"
+
+
+@dataclass(frozen=True)
 class LiveOrderCancellationResult:
     status: str
     account_id: str
@@ -83,23 +96,45 @@ class LiveOrderExecutionService:
         self.order_policy = order_policy or LiveOrderPolicy()
         self.td_mode = td_mode
 
-    def submit_order(self, intent: OrderIntent) -> LiveOrderExecutionResult:
+    def check_order(self, intent: OrderIntent) -> LiveOrderCheckResult:
         policy_result = self.order_policy.evaluate(intent, td_mode=self.td_mode)
         if not policy_result.approved:
-            return LiveOrderExecutionResult(
+            return LiveOrderCheckResult(
                 status="policy_rejected",
-                intent=intent,
-                trading_gate=None,
                 reason=policy_result.reason,
+                intent=intent,
+                policy=policy_result,
+                trading_gate=None,
             )
         gate_result = self.trading_gate.evaluate()
         if not gate_result.trading_allowed:
-            return LiveOrderExecutionResult(
+            return LiveOrderCheckResult(
                 status="blocked",
-                intent=intent,
-                trading_gate=gate_result,
                 reason=gate_result.reason,
+                intent=intent,
+                policy=policy_result,
+                trading_gate=gate_result,
             )
+        return LiveOrderCheckResult(
+            status="allowed",
+            reason="order_check_passed",
+            intent=intent,
+            policy=policy_result,
+            trading_gate=gate_result,
+        )
+
+    def submit_order(self, intent: OrderIntent) -> LiveOrderExecutionResult:
+        check_result = self.check_order(intent)
+        if not check_result.allowed:
+            return LiveOrderExecutionResult(
+                status=check_result.status,
+                intent=intent,
+                trading_gate=check_result.trading_gate,
+                reason=check_result.reason,
+            )
+        gate_result = check_result.trading_gate
+        if gate_result is None:
+            raise RuntimeError("live order check passed without a trading gate result")
         response = self.gateway.place_order(intent, td_mode=self.td_mode)
         if _is_exchange_rejection(response):
             return LiveOrderExecutionResult(

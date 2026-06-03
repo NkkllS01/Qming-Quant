@@ -88,6 +88,19 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     live_sync_args = parser.parse_args(
         ["live-sync", "--symbol", "BTC-USDT-SWAP", "--max-messages", "1", "--public-only"]
     )
+    live_order_check_args = parser.parse_args(
+        [
+            "live-order-check",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.1",
+        ]
+    )
 
     assert sync_args.command == "sync-candles"
     assert sync_args.symbol == "BTC-USDT-SWAP"
@@ -121,6 +134,9 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert live_sync_args.symbol == ["BTC-USDT-SWAP"]
     assert live_sync_args.max_messages == 1
     assert live_sync_args.public_only is True
+    assert live_order_check_args.command == "live-order-check"
+    assert live_order_check_args.symbol == "BTC-USDT-SWAP"
+    assert live_order_check_args.position_action == "open"
 
 
 class FakeGateway:
@@ -1373,6 +1389,73 @@ def test_run_trading_gate_command_blocks_without_equity_snapshot() -> None:
     assert "trading_gate status=blocked" in output
     assert "reason=missing_equity_snapshot" in output
     assert "equity_risk=missing_equity_snapshot" in output
+    assert "trading_allowed=false" in output
+
+
+def test_run_live_order_check_allows_safe_market_open_intent() -> None:
+    gateway = FakeGateway()
+    gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.1"}]
+    gateway.rest_orders = [{"ordId": "okx-1"}]
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    store = live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    _add_usdt_balance(store)
+    live_repo.save_snapshot(account_id="okx_sub_main", store=store)
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=live_repo,
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+    args = build_parser().parse_args(
+        [
+            "live-order-check",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.1",
+            "--client-order-id",
+            "check-1",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_order_check status=allowed" in output
+    assert "policy=order_policy_passed" in output
+    assert "gate=all_checks_passed" in output
+    assert "trading_allowed=true" in output
+
+
+def test_run_live_order_check_rejects_policy_before_gateway_reconciliation() -> None:
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=LiveStateRepository("sqlite:///:memory:"),
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+    args = build_parser().parse_args(
+        [
+            "live-order-check",
+            "--symbol",
+            "SOL-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.1",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_order_check status=policy_rejected" in output
+    assert "reason=symbol_not_allowed" in output
+    assert "gate=not_checked" in output
     assert "trading_allowed=false" in output
 
 
