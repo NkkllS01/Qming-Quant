@@ -5,7 +5,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from app.config import Settings
@@ -570,8 +570,8 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             side=args.side,
             position_action=args.position_action,
             order_type=args.order_type,
-            size=Decimal(args.size),
-            price=Decimal(args.price) if args.price is not None else None,
+            size=_parse_cli_decimal(args.size, field_name="size"),
+            price=_parse_cli_decimal(args.price, field_name="price") if args.price is not None else None,
             reduce_only=args.reduce_only,
             client_order_id=args.client_order_id,
         )
@@ -843,6 +843,16 @@ def _parse_cli_datetime(value: str) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _parse_cli_decimal(value: str, *, field_name: str) -> Decimal:
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a valid decimal") from exc
+    if not parsed.is_finite():
+        raise ValueError(f"{field_name} must be a finite decimal")
+    return parsed
 
 
 def main() -> None:

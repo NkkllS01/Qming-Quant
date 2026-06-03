@@ -42,6 +42,8 @@ class LiveOrderPolicy:
             return LiveOrderPolicyResult(False, "td_mode_not_allowed")
         if intent.order_type not in self.allowed_order_types:
             return LiveOrderPolicyResult(False, "order_type_not_allowed")
+        if intent.order_type == "market" and intent.price is not None:
+            return LiveOrderPolicyResult(False, "market_order_must_not_have_price")
         if intent.position_action not in self.allowed_position_actions:
             return LiveOrderPolicyResult(False, "position_action_not_allowed")
         if intent.size <= 0:

@@ -1459,6 +1459,93 @@ def test_run_live_order_check_rejects_policy_before_gateway_reconciliation() -> 
     assert "trading_allowed=false" in output
 
 
+def test_run_live_order_check_rejects_negative_size_by_policy() -> None:
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=LiveStateRepository("sqlite:///:memory:"),
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+    args = build_parser().parse_args(
+        [
+            "live-order-check",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "-0.1",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_order_check status=policy_rejected" in output
+    assert "reason=size_must_be_positive" in output
+    assert "gate=not_checked" in output
+
+
+def test_run_live_order_check_rejects_invalid_decimal_size() -> None:
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=LiveStateRepository("sqlite:///:memory:"),
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+    args = build_parser().parse_args(
+        [
+            "live-order-check",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "not-a-number",
+        ]
+    )
+
+    try:
+        run_command(args, services)
+    except ValueError as exc:
+        assert "size must be a valid decimal" in str(exc)
+    else:
+        raise AssertionError("expected invalid size to be rejected")
+
+
+def test_run_live_order_check_rejects_market_price_by_policy() -> None:
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=LiveStateRepository("sqlite:///:memory:"),
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+    args = build_parser().parse_args(
+        [
+            "live-order-check",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.1",
+            "--price",
+            "70000",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_order_check status=policy_rejected" in output
+    assert "reason=market_order_must_not_have_price" in output
+    assert "gate=not_checked" in output
+
+
 def _add_usdt_balance(store) -> None:
     store.upsert_balance(
         AccountBalance(

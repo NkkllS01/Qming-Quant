@@ -171,7 +171,7 @@ Dry-run a live order intent without placing it:
 python -m app.main live-order-check --symbol BTC-USDT-SWAP --side buy --position-action open --size 0.1
 ```
 
-`live-order-check` builds an `OrderIntent` and evaluates the same local order policy and trading gate used by live execution, but it does not call OKX order placement.
+`live-order-check` builds an `OrderIntent` and evaluates the same local order policy and trading gate used by live execution, but it does not call OKX order placement. Invalid decimal inputs are rejected before policy checks, and market orders with `--price` are rejected by policy.
 
 Manual emergency controls:
 

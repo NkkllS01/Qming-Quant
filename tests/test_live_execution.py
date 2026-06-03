@@ -71,6 +71,22 @@ def test_live_order_execution_rejects_limit_orders_before_gate() -> None:
     assert gateway.placed == []
 
 
+def test_live_order_execution_rejects_market_order_with_price_before_gate() -> None:
+    gateway = FakeGateway()
+    trading_gate = FakeTradingGate(status="allowed")
+    service = LiveOrderExecutionService(
+        gateway=gateway,
+        trading_gate=trading_gate,
+    )
+
+    result = service.submit_order(_intent(price=Decimal("70000")))
+
+    assert result.status == "policy_rejected"
+    assert result.reason == "market_order_must_not_have_price"
+    assert trading_gate.evaluations == 0
+    assert gateway.placed == []
+
+
 def test_live_order_execution_check_order_allows_without_placing() -> None:
     gateway = FakeGateway()
     trading_gate = FakeTradingGate(status="allowed")
