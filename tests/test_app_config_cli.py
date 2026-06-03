@@ -7,6 +7,7 @@ from app.config import Settings
 from app.main import AppServices, build_parser, run_command
 from core.models import Candle, FundingRate, Instrument
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
+from live.state import AccountBalance
 from storage.live_repository import LiveStateRepository
 from storage.repositories import CandleRepository, FundingRateRepository, InstrumentRepository
 from storage.safety_repository import SafetyRepository
@@ -1252,10 +1253,9 @@ def test_run_trading_gate_command_allows_clean_state() -> None:
     gateway = FakeGateway()
     gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.1"}]
     live_repo = LiveStateRepository("sqlite:///:memory:")
-    live_repo.save_snapshot(
-        account_id="okx_sub_main",
-        store=live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1"),
-    )
+    store = live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    _add_usdt_balance(store)
+    live_repo.save_snapshot(account_id="okx_sub_main", store=store)
     gateway.rest_orders = [{"ordId": "okx-1"}]
     services = AppServices(
         gateway=gateway,
@@ -1268,6 +1268,7 @@ def test_run_trading_gate_command_allows_clean_state() -> None:
 
     assert "trading_gate status=allowed" in output
     assert "reason=all_checks_passed" in output
+    assert "equity_risk=within_equity_limits" in output
     assert "trading_allowed=true" in output
 
 
@@ -1293,10 +1294,9 @@ def test_run_trading_gate_command_blocks_on_reconciliation_mismatch() -> None:
     gateway = FakeGateway()
     gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "short", "pos": "-0.2"}]
     live_repo = LiveStateRepository("sqlite:///:memory:")
-    live_repo.save_snapshot(
-        account_id="okx_sub_main",
-        store=live_store_with_position_and_order(order_id="local-only", direction="long", size="0.1"),
-    )
+    store = live_store_with_position_and_order(order_id="local-only", direction="long", size="0.1")
+    _add_usdt_balance(store)
+    live_repo.save_snapshot(account_id="okx_sub_main", store=store)
     gateway.rest_orders = [{"ordId": "exchange-only"}]
     services = AppServices(
         gateway=gateway,
@@ -1314,3 +1314,37 @@ def test_run_trading_gate_command_blocks_on_reconciliation_mismatch() -> None:
     assert "missing_orders_locally=1" in output
     assert "trading_allowed=false" in output
 
+
+def test_run_trading_gate_command_blocks_without_equity_snapshot() -> None:
+    gateway = FakeGateway()
+    gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.1"}]
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    live_repo.save_snapshot(
+        account_id="okx_sub_main",
+        store=live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1"),
+    )
+    gateway.rest_orders = [{"ordId": "okx-1"}]
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=live_repo,
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+    )
+
+    output = run_command(build_parser().parse_args(["trading-gate"]), services)
+
+    assert "trading_gate status=blocked" in output
+    assert "reason=missing_equity_snapshot" in output
+    assert "equity_risk=missing_equity_snapshot" in output
+    assert "trading_allowed=false" in output
+
+
+def _add_usdt_balance(store) -> None:
+    store.upsert_balance(
+        AccountBalance(
+            currency="USDT",
+            equity=Decimal("1000"),
+            available=Decimal("900"),
+            updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
+    )

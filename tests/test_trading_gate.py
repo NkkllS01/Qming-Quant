@@ -3,10 +3,11 @@ from decimal import Decimal
 
 from core.models import Position
 from live.reconcile import LiveReconciliationService
-from live.state import LiveStateStore
+from live.risk import LiveEquityRiskGuard
+from live.state import AccountBalance, LiveStateStore
 from live.trading_gate import TradingGateService
 from storage.live_repository import LiveStateRepository
-from storage.safety_repository import SafetyRepository
+from storage.safety_repository import EquityRiskState, SafetyRepository
 
 
 def test_safety_repository_defaults_to_not_paused_and_persists_pause_state() -> None:
@@ -84,6 +85,40 @@ def test_trading_gate_blocks_when_reconciliation_is_not_clean() -> None:
     assert len(result.reconciliation.positions_issues) == 2
 
 
+def test_trading_gate_blocks_on_equity_risk_before_reconciliation() -> None:
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    safety_repo = SafetyRepository("sqlite:///:memory:")
+    _save_balance(live_repo, equity="960")
+    safety_repo.upsert_equity_risk_state(
+        EquityRiskState(
+            account_id="okx_sub_main",
+            currency="USDT",
+            day=datetime.now(timezone.utc).date().isoformat(),
+            daily_equity_baseline=Decimal("1000"),
+            peak_equity=Decimal("1000"),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    gate = TradingGateService(
+        reconciliation=FailingReconciliation(),
+        safety_repository=safety_repo,
+        account_id="okx_sub_main",
+        equity_risk_guard=LiveEquityRiskGuard(
+            live_state_repository=live_repo,
+            safety_repository=safety_repo,
+            account_id="okx_sub_main",
+            max_daily_loss=Decimal("0.03"),
+        ),
+    )
+
+    result = gate.evaluate()
+
+    assert result.status == "blocked"
+    assert result.reason == "daily_loss_limit_reached"
+    assert result.equity_risk is not None
+    assert result.reconciliation is None
+
+
 class FakeGateway:
     def __init__(self, *, positions: list[dict]) -> None:
         self._positions = positions
@@ -110,6 +145,19 @@ def _save_local_position(repo: LiveStateRepository, *, size: str, direction: str
             size=Decimal(size),
             entry_price=Decimal("70000"),
             mark_price=Decimal("70100"),
+            updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
+    )
+    repo.save_snapshot(account_id="okx_sub_main", store=store)
+
+
+def _save_balance(repo: LiveStateRepository, *, equity: str) -> None:
+    store = LiveStateStore()
+    store.upsert_balance(
+        AccountBalance(
+            currency="USDT",
+            equity=Decimal(equity),
+            available=Decimal(equity),
             updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
         )
     )

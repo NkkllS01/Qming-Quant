@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy import Boolean, Column, DateTime, MetaData, String, Table, create_engine, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -16,6 +17,16 @@ class PauseState:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class EquityRiskState:
+    account_id: str
+    currency: str
+    day: str
+    daily_equity_baseline: Decimal
+    peak_equity: Decimal
+    updated_at: datetime
+
+
 class SafetyRepository:
     def __init__(self, database_url: str) -> None:
         self.engine: Engine = create_engine(database_url)
@@ -26,6 +37,16 @@ class SafetyRepository:
             Column("account_id", String, primary_key=True),
             Column("paused", Boolean, nullable=False),
             Column("reason", String, nullable=False),
+            Column("updated_at", DateTime(timezone=True), nullable=False),
+        )
+        self.equity_risk_state = Table(
+            "safety_equity_risk_state",
+            self.metadata,
+            Column("account_id", String, primary_key=True),
+            Column("currency", String, primary_key=True),
+            Column("day", String, nullable=False),
+            Column("daily_equity_baseline", String, nullable=False),
+            Column("peak_equity", String, nullable=False),
             Column("updated_at", DateTime(timezone=True), nullable=False),
         )
         self.metadata.create_all(self.engine)
@@ -72,6 +93,49 @@ class SafetyRepository:
             account_id=row["account_id"],
             paused=row["paused"],
             reason=row["reason"],
+            updated_at=_ensure_utc(row["updated_at"]),
+        )
+
+    def upsert_equity_risk_state(self, state: EquityRiskState) -> EquityRiskState:
+        stmt = sqlite_insert(self.equity_risk_state).values(
+            {
+                "account_id": state.account_id,
+                "currency": state.currency,
+                "day": state.day,
+                "daily_equity_baseline": str(state.daily_equity_baseline),
+                "peak_equity": str(state.peak_equity),
+                "updated_at": state.updated_at,
+            }
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["account_id", "currency"],
+            set_={
+                "day": stmt.excluded.day,
+                "daily_equity_baseline": stmt.excluded.daily_equity_baseline,
+                "peak_equity": stmt.excluded.peak_equity,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        with self.engine.begin() as conn:
+            conn.execute(stmt)
+        return state
+
+    def get_equity_risk_state(self, *, account_id: str, currency: str) -> EquityRiskState | None:
+        stmt = (
+            select(self.equity_risk_state)
+            .where(self.equity_risk_state.c.account_id == account_id)
+            .where(self.equity_risk_state.c.currency == currency)
+        )
+        with self.engine.begin() as conn:
+            row = conn.execute(stmt).mappings().first()
+        if row is None:
+            return None
+        return EquityRiskState(
+            account_id=row["account_id"],
+            currency=row["currency"],
+            day=row["day"],
+            daily_equity_baseline=Decimal(row["daily_equity_baseline"]),
+            peak_equity=Decimal(row["peak_equity"]),
             updated_at=_ensure_utc(row["updated_at"]),
         )
 

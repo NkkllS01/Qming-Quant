@@ -2,7 +2,7 @@
 
 Independent personal OKX USDT perpetual contract quant trading system.
 
-Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, a trading safety gate, live fill persistence, and gated live order execution/cancellation services. There is intentionally no live order CLI yet.
+Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, live equity risk gating, live fill persistence, and gated live order execution/cancellation services. There is intentionally no live order CLI yet.
 
 Design docs:
 
@@ -11,7 +11,7 @@ Design docs:
 
 ## Safety Boundary
 
-This project currently supports OKX market/account reads, local simulation/backtesting, live state persistence for tickers, balances, positions, orders, and fills, reconciliation, emergency pause controls, and gated internal live order execution/cancellation services.
+This project currently supports OKX market/account reads, local simulation/backtesting, live state persistence for tickers, balances, positions, orders, and fills, reconciliation, live equity drawdown checks, emergency pause controls, and gated internal live order execution/cancellation services.
 
 The OKX integration is organized as an API Gateway:
 
@@ -163,7 +163,7 @@ Evaluate the live trading safety gate:
 python -m app.main trading-gate --account-id okx_sub_main
 ```
 
-The gate is fail-closed: manual emergency pause blocks first, then REST reconciliation must be clean before `trading_allowed=true`.
+The gate is fail-closed: manual emergency pause blocks first, then local USDT equity must be within the daily loss and total drawdown limits, then REST reconciliation must be clean before `trading_allowed=true`. Missing or invalid local equity snapshots block trading until a private live sync records account balances.
 
 Manual emergency controls:
 
