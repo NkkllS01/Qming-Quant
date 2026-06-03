@@ -76,6 +76,12 @@ python -m app.main sync-candles-range --symbol BTC-USDT-SWAP --timeframe 1m --st
 
 This command uses the OKX paginated range fetcher, so it can cover ranges larger than a single OKX response page.
 
+Sync funding-rate history into the local database:
+
+```powershell
+python -m app.main sync-funding-rates --symbol BTC-USDT-SWAP --limit 100
+```
+
 Check local candle coverage and gap status:
 
 ```powershell
@@ -113,6 +119,8 @@ python -m app.main backtest --symbol BTC-USDT-SWAP --timeframe 15m --report-json
 ```
 
 When `--report-json` is provided, blocked backtests also write a JSON report with the data-gate reason, so batch research runs can track skipped windows.
+
+Backtest JSON reports include a `funding_rates` summary when a local funding-rate repository is available. This records the funding-rate window, count, average, min, max, and first/last funding timestamps, giving futures strategy research context before funding filters are added to strategy logic.
 
 `backtest` blocks by default when local candles are empty, contain timestamp gaps, or have fewer than 30 candles. Use `candle-state` and `repair-missing` first. For research-only experiments where gaps are intentional, pass `--allow-gaps`. For quick smoke tests with shorter samples, pass `--min-candles`.
 
@@ -196,6 +204,7 @@ The current local storage layer supports:
 
 - Candle upsert and sync-state tracking
 - Local instrument specs with exact Decimal values stored as text to avoid SQLite precision noise
+- Funding-rate history upsert and time-window reads for contract strategy research
 
 ## Development Order
 

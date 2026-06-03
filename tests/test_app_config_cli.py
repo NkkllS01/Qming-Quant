@@ -524,6 +524,7 @@ def test_run_backtest_command_filters_candles_by_time_range() -> None:
 def test_run_backtest_command_writes_json_report() -> None:
     repo = CandleRepository("sqlite:///:memory:")
     instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    funding_repo = FundingRateRepository("sqlite:///:memory:")
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     repo.upsert_many(
         [
@@ -553,11 +554,34 @@ def test_run_backtest_command_writes_json_report() -> None:
             )
         ]
     )
+    funding_repo.upsert_many(
+        [
+            FundingRate(
+                symbol="BTC-USDT-SWAP",
+                funding_time=start,
+                funding_rate=Decimal("0.0001"),
+                realized_rate=Decimal("0.00009"),
+            ),
+            FundingRate(
+                symbol="BTC-USDT-SWAP",
+                funding_time=start + timedelta(hours=8),
+                funding_rate=Decimal("-0.0002"),
+                realized_rate=Decimal("-0.00018"),
+            ),
+            FundingRate(
+                symbol="BTC-USDT-SWAP",
+                funding_time=start + timedelta(hours=16),
+                funding_rate=Decimal("0.0003"),
+                realized_rate=Decimal("0.00029"),
+            ),
+        ]
+    )
     report_path = Path(".pytest_cache") / "reports" / "bt.json"
     services = AppServices(
         gateway=FakeGateway(),
         candle_repository=repo,
         instrument_repository=instrument_repo,
+        funding_rate_repository=funding_repo,
     )
     args = build_parser().parse_args(
         [
@@ -590,6 +614,13 @@ def test_run_backtest_command_writes_json_report() -> None:
     assert report["data_gate"]["reason"] == "ok"
     assert report["data_gate"]["candle_count"] == 60
     assert report["instrument"]["lot_size"] == "0.03"
+    assert report["funding_rates"]["status"] == "available"
+    assert report["funding_rates"]["count"] == 2
+    assert report["funding_rates"]["average_rate"] == "-0.00005"
+    assert report["funding_rates"]["min_rate"] == "-0.0002"
+    assert report["funding_rates"]["max_rate"] == "0.0001"
+    assert report["funding_rates"]["first_funding_time"] == "2024-01-01T00:00:00+00:00"
+    assert report["funding_rates"]["last_funding_time"] == "2024-01-01T08:00:00+00:00"
     assert "total_trades" in report["metrics"]
     assert "final_equity" in report
     assert isinstance(report["trades"], list)
@@ -639,6 +670,8 @@ def test_run_backtest_command_writes_blocked_json_report() -> None:
     assert report["data_window"]["candle_count"] == 2
     assert report["data_gate"]["status"] == "blocked"
     assert report["data_gate"]["reason"] == "insufficient_candles"
+    assert report["funding_rates"]["status"] == "unavailable"
+    assert report["funding_rates"]["count"] == 0
     assert report["metrics"] is None
     assert report["trades"] == []
     assert report["equity_curve"] == []

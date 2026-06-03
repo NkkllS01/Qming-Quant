@@ -237,6 +237,11 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             report_path = None
             if args.report_json is not None:
                 report_path = Path(args.report_json)
+                funding_context = _build_funding_context(
+                    services,
+                    args.symbol,
+                    *_report_context_window(candles, args.start, args.end),
+                )
                 _write_backtest_blocked_report(
                     report_path,
                     symbol=args.symbol,
@@ -244,6 +249,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
                     start=args.start,
                     end=args.end,
                     gate=gate,
+                    funding_context=funding_context,
                 )
             suffix = f" report_json={report_path}" if report_path is not None else ""
             return f"{gate.to_cli()}{suffix}"
@@ -266,6 +272,11 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         report_path = None
         if args.report_json is not None:
             report_path = Path(args.report_json)
+            funding_context = _build_funding_context(
+                services,
+                args.symbol,
+                *_report_context_window(candles, args.start, args.end),
+            )
             _write_backtest_report(
                 report_path,
                 symbol=args.symbol,
@@ -278,6 +289,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
                 gate=gate,
                 instrument=instrument,
                 result=result,
+                funding_context=funding_context,
             )
         return (
             f"symbol={args.symbol} timeframe={args.timeframe} "
@@ -397,6 +409,7 @@ def _write_backtest_report(
     gate: DataGateResult,
     instrument: Instrument,
     result,
+    funding_context: dict,
 ) -> None:
     report = {
         "system": "Qiming Quant",
@@ -416,6 +429,7 @@ def _write_backtest_report(
             "lot_size": str(instrument.lot_size),
             "min_size": str(instrument.min_size),
         },
+        "funding_rates": funding_context,
         "initial_equity": str(result.initial_equity),
         "final_equity": str(result.final_equity),
         "metrics": _json_ready(result.metrics.model_dump()),
@@ -434,6 +448,7 @@ def _write_backtest_blocked_report(
     start: str | None,
     end: str | None,
     gate: DataGateResult,
+    funding_context: dict,
 ) -> None:
     report = {
         "system": "Qiming Quant",
@@ -449,6 +464,7 @@ def _write_backtest_blocked_report(
             "min_candles": gate.min_candles,
         },
         "data_gate": gate.to_report(),
+        "funding_rates": funding_context,
         "metrics": None,
         "trades": [],
         "equity_curve": [],
@@ -467,6 +483,63 @@ def _json_ready(value):
     if isinstance(value, datetime):
         return value.isoformat()
     return value
+
+
+def _report_context_window(
+    candles: list[Candle],
+    start: str | None,
+    end: str | None,
+) -> tuple[datetime | None, datetime | None]:
+    start_at = _parse_cli_datetime(start) if start is not None else (candles[0].timestamp if candles else None)
+    end_at = _parse_cli_datetime(end) if end is not None else (candles[-1].timestamp if candles else None)
+    return start_at, end_at
+
+
+def _build_funding_context(
+    services: AppServices,
+    symbol: str,
+    start: datetime | None,
+    end: datetime | None,
+) -> dict:
+    if services.funding_rate_repository is None:
+        return {
+            "status": "unavailable",
+            "count": 0,
+            "window": {
+                "start": start.isoformat() if start is not None else None,
+                "end": end.isoformat() if end is not None else None,
+            },
+        }
+    rates = services.funding_rate_repository.list_rates(symbol, start=start, end=end)
+    if not rates:
+        return {
+            "status": "no_data",
+            "count": 0,
+            "window": {
+                "start": start.isoformat() if start is not None else None,
+                "end": end.isoformat() if end is not None else None,
+            },
+            "average_rate": None,
+            "min_rate": None,
+            "max_rate": None,
+            "first_funding_time": None,
+            "last_funding_time": None,
+        }
+    funding_values = [rate.funding_rate for rate in rates]
+    average_rate = sum(funding_values, Decimal("0")) / Decimal(len(funding_values))
+    return {
+        "status": "available",
+        "count": len(rates),
+        "window": {
+            "start": start.isoformat() if start is not None else None,
+            "end": end.isoformat() if end is not None else None,
+        },
+        "average_rate": str(average_rate),
+        "min_rate": str(min(funding_values)),
+        "max_rate": str(max(funding_values)),
+        "first_funding_time": rates[0].funding_time.isoformat(),
+        "last_funding_time": rates[-1].funding_time.isoformat(),
+    }
 
 
 def _list_command_candles(
