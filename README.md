@@ -2,7 +2,7 @@
 
 Independent personal OKX USDT perpetual contract quant trading system.
 
-Current status: early development skeleton with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, and a basic backtest path. Real order placement is intentionally not implemented yet.
+Current status: early development system with OKX API Gateway foundations, live state message handling, data sync, local candle storage, strategy signal generation, risk checks, simulated fills, backtesting, live reconciliation, a trading safety gate, and a gated live order execution service. There is intentionally no live order CLI yet.
 
 Design docs:
 
@@ -11,22 +11,21 @@ Design docs:
 
 ## Safety Boundary
 
-This project currently supports read-only OKX API operations and local simulation/backtesting.
+This project currently supports OKX market/account reads, local simulation/backtesting, live state persistence, reconciliation, emergency pause controls, and a gated internal live order execution service.
 
 The OKX integration is organized as an API Gateway:
 
-- REST API: historical candles, instruments, funding rates, account queries, position queries, pending-order queries, and future REST reconciliation.
+- REST API: historical candles, instruments, funding rates, account queries, position queries, pending-order queries, REST reconciliation, order placement, and order cancellation.
 - WebSocket API: public/private URL, private login message signing, subscribe/unsubscribe message construction, message dispatch, reconnect subscription replay, a `websockets` network adapter, and normalized live state handling for tickers, account balances, positions, and orders are implemented as tested foundations. An always-on live sync loop is intentionally not started yet.
 
-Not implemented yet:
+Still intentionally not exposed:
 
-- Real order placement
-- Real order cancellation
-- Live public/private WebSocket order/fill/position sync
-- Persistent live state recovery
-- Live trading loop
+- A CLI command for live order placement
+- An always-on live trading loop
+- A production scheduler/daemon
+- Full private fill-event lifecycle handling
 
-Do not add live trading until data sync, backtesting, simulation, risk checks, and reconciliation are verified.
+Do not expose live trading until data sync, backtesting, simulation, risk checks, reconciliation, small-size constraints, and operator emergency controls are reviewed together.
 
 ## Setup
 
@@ -173,7 +172,7 @@ python -m app.main emergency-pause --reason operator_stop
 python -m app.main emergency-resume --reason operator_resume
 ```
 
-The codebase includes a minimal OKX REST order adapter and a live execution service that must pass the trading gate before calling OKX. There is intentionally no live order CLI yet; live order placement should only be exposed after the gated execution path is reviewed with small-size constraints.
+The codebase includes a minimal OKX REST order adapter and a live execution service that must pass the trading gate before calling OKX. Successful submissions are recorded into the local live order snapshot for restart recovery and reconciliation. If OKX returns a per-order rejection code, the service reports `exchange_rejected` and does not record a submitted local order. There is intentionally no live order CLI yet; live order placement should only be exposed after the gated execution path is reviewed with small-size constraints.
 
 The current backtest engine supports a single-position K-line lifecycle with:
 
