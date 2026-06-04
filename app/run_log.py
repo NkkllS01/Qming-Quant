@@ -33,6 +33,14 @@ class RuntimeEventLogger:
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
 
+    def tail(self, *, limit: int) -> list[dict[str, Any]]:
+        if not self.enabled or not self.path.exists():
+            return []
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        return [json.loads(line) for line in lines[-limit:] if line.strip()]
+
 
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict):

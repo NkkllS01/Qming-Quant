@@ -242,6 +242,7 @@ python -m app.main emergency-resume --reason operator_resume
 Runtime audit log:
 
 ```powershell
+python -m app.main run-log-tail --limit 20
 Get-Content logs/qiming-events.jsonl
 ```
 

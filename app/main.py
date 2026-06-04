@@ -225,6 +225,9 @@ def build_parser() -> argparse.ArgumentParser:
     emergency_resume.add_argument("--account-id", default="okx_sub_main")
     emergency_resume.add_argument("--reason", default="manual_resume")
 
+    run_log_tail = subparsers.add_parser("run-log-tail", help="Print recent runtime audit events")
+    run_log_tail.add_argument("--limit", type=int, default=20)
+
     return parser
 
 
@@ -649,6 +652,13 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             details={"account_id": state.account_id, "reason": state.reason},
         )
         return output
+    if args.command == "run-log-tail":
+        if services.runtime_logger is None:
+            return "run_log_tail status=disabled"
+        events = services.runtime_logger.tail(limit=args.limit)
+        if not events:
+            return "run_log_tail status=empty"
+        return "\n".join(json.dumps(event, ensure_ascii=False, separators=(",", ":")) for event in events)
     if args.command == "trading-gate":
         if services.live_state_repository is None:
             raise RuntimeError("Live state repository is not configured")

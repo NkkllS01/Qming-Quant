@@ -189,6 +189,7 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
             "0.1",
         ]
     )
+    run_log_tail_args = parser.parse_args(["run-log-tail", "--limit", "5"])
 
     assert sync_args.command == "sync-candles"
     assert sync_args.symbol == "BTC-USDT-SWAP"
@@ -233,6 +234,8 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert live_sync_args.public_only is True
     assert live_order_check_args.command == "live-order-check"
     assert live_order_check_args.symbol == "BTC-USDT-SWAP"
+    assert run_log_tail_args.command == "run-log-tail"
+    assert run_log_tail_args.limit == 5
     assert live_order_check_args.position_action == "open"
 
 
@@ -1565,6 +1568,37 @@ def test_run_emergency_pause_records_runtime_event() -> None:
         "account_id": "okx_sub_main",
         "reason": "operator_stop",
     }
+
+
+def test_run_log_tail_returns_recent_runtime_events() -> None:
+    log_path = Path("test-runtime-events.jsonl")
+    logger = RuntimeEventLogger(log_path)
+    logger.record(command="first", outcome="completed")
+    logger.record(command="second", outcome="blocked", details={"reason": "test"})
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        runtime_logger=logger,
+    )
+
+    output = run_command(build_parser().parse_args(["run-log-tail", "--limit", "1"]), services)
+
+    event = json.loads(output)
+    assert event["command"] == "second"
+    assert event["outcome"] == "blocked"
+    assert event["details"] == {"reason": "test"}
+
+
+def test_run_log_tail_reports_disabled_when_logger_is_not_configured() -> None:
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        runtime_logger=None,
+    )
+
+    output = run_command(build_parser().parse_args(["run-log-tail"]), services)
+
+    assert output == "run_log_tail status=disabled"
 
 
 def test_run_trading_gate_command_allows_clean_state() -> None:
