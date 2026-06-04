@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from app.main import AppServices, build_parser, run_command
 from app.run_log import RuntimeEventLogger
-from core.models import Instrument, MarkPrice, Order
+from core.models import Instrument, MarkPrice, Order, Position
 from live.state import AccountBalance, LiveStateStore
 from storage.live_repository import LiveStateRepository
 from storage.repositories import CandleRepository, InstrumentRepository, MarkPriceRepository
@@ -230,6 +230,82 @@ def test_live_small_execute_rejects_when_local_active_order_limit_is_reached() -
         assert "max live order count reached" in str(exc)
     else:
         raise AssertionError("expected active live order limit to reject the order")
+
+    assert gateway.place_order_calls == 0
+
+
+def test_live_small_execute_rejects_when_projected_position_exceeds_limit() -> None:
+    gateway = SmallLiveGateway()
+    services, live_repo = _ready_services(gateway)
+    snapshot = live_repo.load_snapshot(account_id="okx_sub_main")
+    snapshot.upsert_position(
+        Position(
+            account_id="okx_sub_main",
+            symbol="BTC-USDT-SWAP",
+            direction="long",
+            size=Decimal("0.01"),
+            entry_price=Decimal("70000"),
+            mark_price=Decimal("70000"),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    live_repo.save_snapshot(account_id="okx_sub_main", store=snapshot)
+    gateway.rest_positions = [{"instId": "BTC-USDT-SWAP", "posSide": "long", "pos": "0.01"}]
+    args = build_parser().parse_args(
+        [
+            "live-small-execute",
+            "--enable-live-trading",
+            "--confirm-first-live-order",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.01",
+            "--max-live-position-size",
+            "0.01",
+        ]
+    )
+
+    try:
+        run_command(args, services)
+    except RuntimeError as exc:
+        assert "max live position size reached" in str(exc)
+    else:
+        raise AssertionError("expected live pilot position size limit to reject the order")
+
+    assert gateway.place_order_calls == 0
+
+
+def test_live_small_execute_rejects_when_single_order_risk_exceeds_limit() -> None:
+    gateway = SmallLiveGateway()
+    services, _ = _ready_services(gateway)
+    args = build_parser().parse_args(
+        [
+            "live-small-execute",
+            "--enable-live-trading",
+            "--confirm-first-live-order",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.01",
+            "--max-single-risk-usdt",
+            "10",
+        ]
+    )
+
+    try:
+        run_command(args, services)
+    except RuntimeError as exc:
+        assert "max single live order risk reached" in str(exc)
+    else:
+        raise AssertionError("expected single-order risk limit to reject the order")
 
     assert gateway.place_order_calls == 0
 

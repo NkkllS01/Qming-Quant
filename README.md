@@ -319,10 +319,10 @@ python -m app.main live-simulated-cancel --enable-simulated-execution --symbol B
 Run the small real-money pilot path:
 
 ```powershell
-python -m app.main live-small-execute --enable-live-trading --confirm-first-live-order --symbol BTC-USDT-SWAP --side buy --position-action open --size 0.01 --client-order-id live-client-1
+python -m app.main live-small-execute --enable-live-trading --confirm-first-live-order --symbol BTC-USDT-SWAP --side buy --position-action open --size 0.01 --client-order-id live-client-1 --max-live-position-size 0.01 --max-single-risk-usdt 1000
 ```
 
-`live-small-execute` is off by default, refuses simulated-trading mode, requires explicit live enablement plus first-order confirmation, enforces a tiny `--max-live-size`, limits local active live orders, checks pre-live readiness, passes the same trading gate, records runtime audit data, persists the local snapshot, and reconciles after submission.
+`live-small-execute` is off by default, refuses simulated-trading mode, requires explicit live enablement plus first-order confirmation, enforces a tiny `--max-live-size`, caps projected local symbol position size with `--max-live-position-size`, caps conservative single-order risk exposure with `--max-single-risk-usdt`, limits local active live orders, checks pre-live readiness, passes the same trading gate, records runtime audit data, persists the local snapshot, and reconciles after submission.
 
 Check local pre-live readiness:
 

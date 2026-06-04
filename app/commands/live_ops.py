@@ -123,6 +123,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     small_execute.add_argument("--reduce-only", action="store_true")
     small_execute.add_argument("--client-order-id", default="manual-small-live")
     small_execute.add_argument("--max-live-size", default="0.01")
+    small_execute.add_argument("--max-live-position-size", default="0.01")
+    small_execute.add_argument("--max-single-risk-usdt", default="1000")
     small_execute.add_argument("--max-live-orders", type=int, default=1)
     small_execute.set_defaults(handler=handle_live_small_execute)
 
@@ -610,15 +612,29 @@ def handle_live_small_execute(args: argparse.Namespace, services: AppServices) -
         raise RuntimeError("Safety repository is not configured")
     size = parse_cli_decimal(args.size, field_name="size")
     max_live_size = parse_cli_decimal(args.max_live_size, field_name="max-live-size")
+    max_live_position_size = parse_cli_decimal(args.max_live_position_size, field_name="max-live-position-size")
+    max_single_risk_usdt = parse_cli_decimal(args.max_single_risk_usdt, field_name="max-single-risk-usdt")
     if size > max_live_size:
         raise RuntimeError("size exceeds max live pilot size")
     active_orders = _active_live_order_count(services, account_id=args.account_id)
     if active_orders >= args.max_live_orders:
         raise RuntimeError("max live order count reached")
+    projected_position_size = _projected_symbol_position_size(
+        services,
+        account_id=args.account_id,
+        symbol=args.symbol,
+        order_size=size,
+        position_action=args.position_action,
+    )
+    if projected_position_size > max_live_position_size:
+        raise RuntimeError("max live position size reached")
     readiness = evaluate_prelive_readiness(services, account_id=args.account_id, symbols=[args.symbol])
     if readiness["status"] != "ready":
         issues = ",".join(readiness["issues"]) if readiness["issues"] else "unknown"
         raise RuntimeError(f"prelive readiness blocked: {issues}")
+    single_order_risk_usdt = _single_order_notional_risk_usdt(services, symbol=args.symbol, size=size)
+    if single_order_risk_usdt > max_single_risk_usdt:
+        raise RuntimeError("max single live order risk reached")
     intent = OrderIntent(
         account_id=args.account_id,
         bot_id=args.bot_id,
@@ -657,6 +673,9 @@ def handle_live_small_execute(args: argparse.Namespace, services: AppServices) -
             "reason": result.reason,
             "size": size,
             "max_live_size": max_live_size,
+            "max_live_position_size": max_live_position_size,
+            "single_order_risk_usdt": single_order_risk_usdt,
+            "max_single_risk_usdt": max_single_risk_usdt,
             "reconcile_status": reconcile.status,
         },
     )
@@ -664,6 +683,8 @@ def handle_live_small_execute(args: argparse.Namespace, services: AppServices) -
         f"live_small_execute status={result.status} reason={result.reason} "
         f"symbol={args.symbol} client_order_id={args.client_order_id} "
         f"size={size} max_live_size={max_live_size} "
+        f"max_live_position_size={max_live_position_size} "
+        f"single_order_risk_usdt={single_order_risk_usdt} max_single_risk_usdt={max_single_risk_usdt} "
         f"reconcile_status={reconcile.status} trading_allowed={str(result.submitted).lower()}"
     )
 
@@ -674,3 +695,29 @@ def _active_live_order_count(services: AppServices, *, account_id: str) -> int:
     store = services.live_state_repository.load_snapshot(account_id=account_id)
     terminal = {"filled", "canceled", "cancelled", "rejected", "exchange_rejected", "failed"}
     return sum(1 for order in store.orders.values() if order.status.lower() not in terminal)
+
+
+def _projected_symbol_position_size(
+    services: AppServices,
+    *,
+    account_id: str,
+    symbol: str,
+    order_size,
+    position_action: str,
+):
+    if services.live_state_repository is None:
+        return order_size
+    store = services.live_state_repository.load_snapshot(account_id=account_id)
+    current_size = sum(position.size for position in store.positions.values() if position.symbol == symbol)
+    if position_action == "open":
+        return current_size + order_size
+    return current_size
+
+
+def _single_order_notional_risk_usdt(services: AppServices, *, symbol: str, size):
+    if services.mark_price_repository is None:
+        raise RuntimeError("Mark price repository is not configured")
+    mark_price = services.mark_price_repository.get(symbol)
+    if mark_price is None:
+        raise RuntimeError("missing mark price for live risk limit")
+    return mark_price.mark_price * size

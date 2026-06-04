@@ -165,6 +165,10 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
             "open",
             "--size",
             "0.01",
+            "--max-live-position-size",
+            "0.02",
+            "--max-single-risk-usdt",
+            "1000",
         ]
     )
     live_simulated_cancel_args = parser.parse_args(
@@ -242,6 +246,8 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert live_small_execute_args.command == "live-small-execute"
     assert live_small_execute_args.enable_live_trading is True
     assert live_small_execute_args.confirm_first_live_order is True
+    assert live_small_execute_args.max_live_position_size == "0.02"
+    assert live_small_execute_args.max_single_risk_usdt == "1000"
     assert prelive_readiness_args.command == "prelive-readiness"
     assert prelive_readiness_args.account_id == "okx_sub_main"
     assert prelive_readiness_args.symbol == ["BTC-USDT-SWAP"]
