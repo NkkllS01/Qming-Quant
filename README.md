@@ -360,6 +360,15 @@ python -m app.main live-order-check --symbol BTC-USDT-SWAP --side buy --position
 When local instrument specs are configured, live order checks also require a synced live instrument row and verify `size` against OKX `minSz` and `lotSz` before the trading gate runs. Run `sync-instruments` before using live checks or live execution.
 If a local active live order already uses the same `client_order_id` for the same symbol, live checks fail with `duplicate_client_order_id` before the trading gate runs. This protects retries and restarts from submitting the same logical order twice.
 
+Check local pre-live readiness:
+
+```powershell
+python -m app.main prelive-readiness
+python -m app.main prelive-readiness --symbol BTC-USDT-SWAP --symbol ETH-USDT-SWAP
+```
+
+`prelive-readiness` is read-only and local-state based. It checks manual pause state, runtime log configuration, synced instrument specs, fresh mark-price snapshots, and a local USDT balance snapshot before live order checks or live execution are considered.
+
 Manual emergency controls:
 
 ```powershell

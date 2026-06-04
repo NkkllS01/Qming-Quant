@@ -189,6 +189,9 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
             "0.1",
         ]
     )
+    prelive_readiness_args = parser.parse_args(
+        ["prelive-readiness", "--account-id", "okx_sub_main", "--symbol", "BTC-USDT-SWAP"]
+    )
     run_log_tail_args = parser.parse_args(["run-log-tail", "--limit", "5"])
     operator_status_args = parser.parse_args(["operator-status", "--account-id", "okx_sub_main", "--skip-gate"])
 
@@ -235,6 +238,9 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert live_sync_args.public_only is True
     assert live_order_check_args.command == "live-order-check"
     assert live_order_check_args.symbol == "BTC-USDT-SWAP"
+    assert prelive_readiness_args.command == "prelive-readiness"
+    assert prelive_readiness_args.account_id == "okx_sub_main"
+    assert prelive_readiness_args.symbol == ["BTC-USDT-SWAP"]
     assert run_log_tail_args.command == "run-log-tail"
     assert run_log_tail_args.limit == 5
     assert operator_status_args.command == "operator-status"
@@ -1548,6 +1554,183 @@ def test_run_emergency_pause_and_resume_commands_persist_manual_state() -> None:
     assert "trading_allowed=false" in pause_output
     assert "emergency_resume account_id=okx_sub_main paused=false" in resume_output
     assert safety_repo.get_pause(account_id="okx_sub_main").paused is False
+
+
+def test_prelive_readiness_reports_ready_when_local_state_is_available() -> None:
+    instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    mark_repo = MarkPriceRepository("sqlite:///:memory:")
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    live_store = live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    _add_usdt_balance(live_store)
+    live_repo.save_snapshot(account_id="okx_sub_main", store=live_store)
+    instrument_repo.upsert_many(
+        [
+            Instrument(
+                symbol="BTC-USDT-SWAP",
+                inst_type="SWAP",
+                tick_size=Decimal("0.1"),
+                lot_size=Decimal("0.01"),
+                min_size=Decimal("0.01"),
+                state="live",
+            )
+        ]
+    )
+    mark_repo.upsert_many(
+        [
+            MarkPrice(
+                symbol="BTC-USDT-SWAP",
+                mark_price=Decimal("70000"),
+                updated_at=datetime.now(timezone.utc),
+            )
+        ]
+    )
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        instrument_repository=instrument_repo,
+        mark_price_repository=mark_repo,
+        live_state_repository=live_repo,
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+        runtime_logger=RuntimeEventLogger(Path("test-runtime-events.jsonl")),
+        default_symbols=["BTC-USDT-SWAP"],
+    )
+
+    output = run_command(build_parser().parse_args(["prelive-readiness"]), services)
+
+    assert "prelive_readiness status=ready" in output
+    assert "manual_paused=false" in output
+    assert "runtime_log=configured" in output
+    assert "instruments=ok" in output
+    assert "mark_prices=market_data_fresh" in output
+    assert "balance_snapshot=available" in output
+    assert "issues=none" in output
+
+
+def test_prelive_readiness_reports_missing_local_requirements() -> None:
+    safety_repo = SafetyRepository("sqlite:///:memory:")
+    safety_repo.set_pause(account_id="okx_sub_main", paused=True, reason="operator_stop")
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        instrument_repository=InstrumentRepository("sqlite:///:memory:"),
+        mark_price_repository=MarkPriceRepository("sqlite:///:memory:"),
+        live_state_repository=LiveStateRepository("sqlite:///:memory:"),
+        safety_repository=safety_repo,
+        runtime_logger=None,
+        default_symbols=["BTC-USDT-SWAP"],
+    )
+
+    output = run_command(build_parser().parse_args(["prelive-readiness"]), services)
+
+    assert "prelive_readiness status=blocked" in output
+    assert "manual_paused=true" in output
+    assert "runtime_log=disabled" in output
+    assert "instruments=missing:BTC-USDT-SWAP" in output
+    assert "mark_prices=missing_mark_price:missing=BTC-USDT-SWAP" in output
+    assert "balance_snapshot=missing_balance_snapshot" in output
+    assert "manual_pause" in output
+    assert "runtime_log_disabled" in output
+    assert "missing_instruments" in output
+
+
+def test_prelive_readiness_reports_stale_mark_price() -> None:
+    instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    mark_repo = MarkPriceRepository("sqlite:///:memory:")
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    live_store = live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    _add_usdt_balance(live_store)
+    live_repo.save_snapshot(account_id="okx_sub_main", store=live_store)
+    instrument_repo.upsert_many(
+        [
+            Instrument(
+                symbol="BTC-USDT-SWAP",
+                inst_type="SWAP",
+                tick_size=Decimal("0.1"),
+                lot_size=Decimal("0.01"),
+                min_size=Decimal("0.01"),
+                state="live",
+            )
+        ]
+    )
+    mark_repo.upsert_many(
+        [
+            MarkPrice(
+                symbol="BTC-USDT-SWAP",
+                mark_price=Decimal("70000"),
+                updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            )
+        ]
+    )
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        instrument_repository=instrument_repo,
+        mark_price_repository=mark_repo,
+        live_state_repository=live_repo,
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+        runtime_logger=RuntimeEventLogger(Path("test-runtime-events.jsonl")),
+        default_symbols=["BTC-USDT-SWAP"],
+    )
+
+    output = run_command(build_parser().parse_args(["prelive-readiness"]), services)
+
+    assert "prelive_readiness status=blocked" in output
+    assert "mark_prices=stale_mark_price:stale=BTC-USDT-SWAP" in output
+    assert "issues=stale_mark_price" in output
+
+
+def test_prelive_readiness_is_local_read_only() -> None:
+    class ExplodingGateway:
+        def __getattr__(self, name):
+            raise AssertionError(f"gateway should not be used: {name}")
+
+    class ExplodingRuntimeLogger(RuntimeEventLogger):
+        def record(self, *, command: str, outcome: str, details: dict | None = None) -> None:
+            raise AssertionError("prelive-readiness must not write runtime events")
+
+    instrument_repo = InstrumentRepository("sqlite:///:memory:")
+    mark_repo = MarkPriceRepository("sqlite:///:memory:")
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    safety_repo = SafetyRepository("sqlite:///:memory:")
+    live_store = live_store_with_position_and_order(order_id="okx-1", direction="long", size="0.1")
+    _add_usdt_balance(live_store)
+    live_repo.save_snapshot(account_id="okx_sub_main", store=live_store)
+    instrument_repo.upsert_many(
+        [
+            Instrument(
+                symbol="BTC-USDT-SWAP",
+                inst_type="SWAP",
+                tick_size=Decimal("0.1"),
+                lot_size=Decimal("0.01"),
+                min_size=Decimal("0.01"),
+                state="live",
+            )
+        ]
+    )
+    mark_repo.upsert_many(
+        [
+            MarkPrice(
+                symbol="BTC-USDT-SWAP",
+                mark_price=Decimal("70000"),
+                updated_at=datetime.now(timezone.utc),
+            )
+        ]
+    )
+    services = AppServices(
+        gateway=ExplodingGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        instrument_repository=instrument_repo,
+        mark_price_repository=mark_repo,
+        live_state_repository=live_repo,
+        safety_repository=safety_repo,
+        runtime_logger=ExplodingRuntimeLogger(Path("test-runtime-events.jsonl")),
+        default_symbols=["BTC-USDT-SWAP"],
+    )
+
+    output = run_command(build_parser().parse_args(["prelive-readiness"]), services)
+
+    assert "prelive_readiness status=ready" in output
+    assert safety_repo.get_equity_risk_state(account_id="okx_sub_main", currency="USDT") is None
 
 
 def test_run_emergency_pause_records_runtime_event() -> None:

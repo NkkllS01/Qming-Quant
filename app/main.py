@@ -222,6 +222,10 @@ def build_parser() -> argparse.ArgumentParser:
     live_order_check.add_argument("--reduce-only", action="store_true")
     live_order_check.add_argument("--client-order-id", default="manual-live-check")
 
+    prelive_readiness = subparsers.add_parser("prelive-readiness", help="Check local pre-live readiness")
+    prelive_readiness.add_argument("--account-id", default="okx_sub_main")
+    prelive_readiness.add_argument("--symbol", action="append", default=[])
+
     emergency_pause = subparsers.add_parser("emergency-pause", help="Manually block live trading")
     emergency_pause.add_argument("--account-id", default="okx_sub_main")
     emergency_pause.add_argument("--reason", default="manual_emergency_pause")
@@ -619,6 +623,23 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             },
         )
         return output
+    if args.command == "prelive-readiness":
+        symbols = args.symbol or services.default_symbols or ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+        result = _evaluate_prelive_readiness(
+            services,
+            account_id=args.account_id,
+            symbols=symbols,
+        )
+        return (
+            f"prelive_readiness status={result['status']} "
+            f"account_id={args.account_id} symbols={','.join(symbols)} "
+            f"manual_paused={str(result['manual_paused']).lower()} "
+            f"runtime_log={result['runtime_log']} "
+            f"instruments={result['instruments']} "
+            f"mark_prices={result['mark_prices']} "
+            f"balance_snapshot={result['balance_snapshot']} "
+            f"issues={','.join(result['issues']) if result['issues'] else 'none'}"
+        )
     if args.command == "emergency-pause":
         if services.safety_repository is None:
             raise RuntimeError("Safety repository is not configured")
@@ -906,6 +927,87 @@ def _latest_event_status(
     if latest_event is None:
         return "empty"
     return "available"
+
+
+def _evaluate_prelive_readiness(
+    services: AppServices,
+    *,
+    account_id: str,
+    symbols: list[str],
+) -> dict:
+    issues: list[str] = []
+    pause_state = (
+        services.safety_repository.get_pause(account_id=account_id)
+        if services.safety_repository is not None
+        else None
+    )
+    manual_paused = pause_state.paused if pause_state is not None else False
+    if pause_state is None:
+        issues.append("missing_safety_repository")
+    elif pause_state.paused:
+        issues.append("manual_pause")
+
+    runtime_log = "configured" if services.runtime_logger is not None else "disabled"
+    if services.runtime_logger is None:
+        issues.append("runtime_log_disabled")
+
+    missing_instruments = _missing_instruments(services, symbols)
+    instruments = "ok" if not missing_instruments else f"missing:{'|'.join(missing_instruments)}"
+    if missing_instruments:
+        issues.append("missing_instruments")
+
+    market_data = _build_market_data_guard(services, symbols=symbols)
+    if market_data is None:
+        mark_prices = "unavailable"
+        issues.append("missing_mark_price_repository")
+    else:
+        market_result = market_data.evaluate()
+        mark_prices = _market_data_readiness_status(market_result)
+        if not market_result.trading_allowed:
+            issues.append(market_result.reason)
+
+    balance_snapshot = _balance_snapshot_status(services, account_id)
+    if balance_snapshot != "available":
+        issues.append(balance_snapshot)
+
+    return {
+        "status": "ready" if not issues else "blocked",
+        "manual_paused": manual_paused,
+        "runtime_log": runtime_log,
+        "instruments": instruments,
+        "mark_prices": mark_prices,
+        "balance_snapshot": balance_snapshot,
+        "issues": issues,
+    }
+
+
+def _missing_instruments(services: AppServices, symbols: list[str]) -> list[str]:
+    if services.instrument_repository is None:
+        return list(symbols)
+    return [symbol for symbol in symbols if services.instrument_repository.get(symbol) is None]
+
+
+def _balance_snapshot_status(services: AppServices, account_id: str) -> str:
+    if services.live_state_repository is None:
+        return "missing_live_state_repository"
+    store = services.live_state_repository.load_snapshot(account_id=account_id)
+    balance = store.balances.get("USDT")
+    if balance is None:
+        return "missing_balance_snapshot"
+    if balance.equity <= 0:
+        return "invalid_balance_snapshot"
+    return "available"
+
+
+def _market_data_readiness_status(result) -> str:
+    if result.trading_allowed:
+        return result.reason
+    parts = [result.reason]
+    if result.missing_symbols:
+        parts.append(f"missing={'|'.join(result.missing_symbols)}")
+    if result.stale_symbols:
+        parts.append(f"stale={'|'.join(result.stale_symbols)}")
+    return ":".join(parts)
 
 
 def _record_runtime_event(
