@@ -4,17 +4,17 @@ import argparse
 import asyncio
 
 from app.cli_parsing import parse_cli_decimal
+from app.commands.live_format import live_sync_output, trading_gate_output
 from app.commands.runtime import record_runtime_event
+from app.live_readiness import evaluate_prelive_readiness
+from app.live_services import build_trading_gate, evaluate_cli_trading_gate
 from app.services import AppServices
 from core.models import OrderIntent
 from live.bot import LiveBotConfig, LiveBotLoop
 from live.execution import LiveOrderExecutionService
 from live.fill_sync import LiveFillSyncService
-from live.market_data_guard import LiveMarketDataGuard
 from live.reconcile import LiveReconciliationService
-from live.risk import LiveEquityRiskGuard
 from live.sync import LiveSyncService
-from live.trading_gate import TradingGateService
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -208,36 +208,6 @@ def handle_live_bot_once(args: argparse.Namespace, services: AppServices) -> str
     )
 
 
-def live_sync_output(
-    *,
-    mode: str,
-    symbols: list[str],
-    public_messages: int,
-    private_messages: int,
-    tickers_count: int,
-    balances_count: int,
-    positions_count: int,
-    orders_count: int,
-    fills_count: int,
-    fills_channel: bool,
-    persisted: bool,
-    trading_enabled: bool,
-) -> str:
-    return (
-        f"live_sync mode={mode} symbols={','.join(symbols)} "
-        f"public_messages={public_messages} "
-        f"private_messages={private_messages} "
-        f"tickers={tickers_count} "
-        f"balances={balances_count} "
-        f"positions={positions_count} "
-        f"orders={orders_count} "
-        f"fills={fills_count} "
-        f"fills_channel={str(fills_channel).lower()} "
-        f"persisted={str(persisted).lower()} "
-        f"trading_enabled={str(trading_enabled).lower()}"
-    )
-
-
 def handle_live_reconcile(args: argparse.Namespace, services: AppServices) -> str:
     if services.live_state_repository is None:
         raise RuntimeError("Live state repository is not configured")
@@ -325,30 +295,6 @@ def handle_trading_gate(args: argparse.Namespace, services: AppServices) -> str:
     return output
 
 
-def trading_gate_output(
-    *,
-    status: str,
-    reason: str,
-    manual_paused: bool,
-    equity_risk: str,
-    market_data: str,
-    position_issues: int,
-    missing_orders_on_exchange: int,
-    missing_orders_locally: int,
-    trading_allowed: bool,
-) -> str:
-    return (
-        f"trading_gate status={status} reason={reason} "
-        f"manual_paused={str(manual_paused).lower()} "
-        f"equity_risk={equity_risk} "
-        f"market_data={market_data} "
-        f"position_issues={position_issues} "
-        f"missing_orders_on_exchange={missing_orders_on_exchange} "
-        f"missing_orders_locally={missing_orders_locally} "
-        f"trading_allowed={str(trading_allowed).lower()}"
-    )
-
-
 def handle_live_order_check(args: argparse.Namespace, services: AppServices) -> str:
     if services.live_state_repository is None:
         raise RuntimeError("Live state repository is not configured")
@@ -411,118 +357,3 @@ def handle_live_order_check(args: argparse.Namespace, services: AppServices) -> 
     )
     return output
 
-
-def build_market_data_guard(services: AppServices, *, symbols: list[str]) -> LiveMarketDataGuard | None:
-    if services.mark_price_repository is None:
-        return None
-    return LiveMarketDataGuard(
-        mark_price_repository=services.mark_price_repository,
-        symbols=symbols,
-        max_mark_price_age_seconds=services.max_mark_price_age_seconds,
-    )
-
-
-def build_trading_gate(services: AppServices, *, account_id: str, symbols: list[str]) -> TradingGateService:
-    if services.live_state_repository is None:
-        raise RuntimeError("Live state repository is not configured")
-    if services.safety_repository is None:
-        raise RuntimeError("Safety repository is not configured")
-    reconciliation = LiveReconciliationService(
-        gateway=services.gateway,
-        repository=services.live_state_repository,
-        account_id=account_id,
-    )
-    equity_risk_guard = LiveEquityRiskGuard(
-        live_state_repository=services.live_state_repository,
-        safety_repository=services.safety_repository,
-        account_id=account_id,
-        max_daily_loss=services.max_daily_loss,
-        max_total_drawdown=services.max_total_drawdown_pause,
-    )
-    return TradingGateService(
-        reconciliation=reconciliation,
-        safety_repository=services.safety_repository,
-        account_id=account_id,
-        equity_risk_guard=equity_risk_guard,
-        market_data_guard=build_market_data_guard(services, symbols=symbols),
-    )
-
-
-def evaluate_cli_trading_gate(services: AppServices, *, account_id: str, symbols: list[str]):
-    return build_trading_gate(services, account_id=account_id, symbols=symbols).evaluate()
-
-
-def evaluate_prelive_readiness(services: AppServices, *, account_id: str, symbols: list[str]) -> dict:
-    issues: list[str] = []
-    pause_state = (
-        services.safety_repository.get_pause(account_id=account_id)
-        if services.safety_repository is not None
-        else None
-    )
-    manual_paused = pause_state.paused if pause_state is not None else False
-    if pause_state is None:
-        issues.append("missing_safety_repository")
-    elif pause_state.paused:
-        issues.append("manual_pause")
-
-    runtime_log = "configured" if services.runtime_logger is not None else "disabled"
-    if services.runtime_logger is None:
-        issues.append("runtime_log_disabled")
-
-    missing_instruments = missing_instruments_for_symbols(services, symbols)
-    instruments = "ok" if not missing_instruments else f"missing:{'|'.join(missing_instruments)}"
-    if missing_instruments:
-        issues.append("missing_instruments")
-
-    market_data = build_market_data_guard(services, symbols=symbols)
-    if market_data is None:
-        mark_prices = "unavailable"
-        issues.append("missing_mark_price_repository")
-    else:
-        market_result = market_data.evaluate()
-        mark_prices = market_data_readiness_status(market_result)
-        if not market_result.trading_allowed:
-            issues.append(market_result.reason)
-
-    balance_snapshot = balance_snapshot_status(services, account_id)
-    if balance_snapshot != "available":
-        issues.append(balance_snapshot)
-
-    return {
-        "status": "ready" if not issues else "blocked",
-        "manual_paused": manual_paused,
-        "runtime_log": runtime_log,
-        "instruments": instruments,
-        "mark_prices": mark_prices,
-        "balance_snapshot": balance_snapshot,
-        "issues": issues,
-    }
-
-
-def missing_instruments_for_symbols(services: AppServices, symbols: list[str]) -> list[str]:
-    if services.instrument_repository is None:
-        return list(symbols)
-    return [symbol for symbol in symbols if services.instrument_repository.get(symbol) is None]
-
-
-def balance_snapshot_status(services: AppServices, account_id: str) -> str:
-    if services.live_state_repository is None:
-        return "missing_live_state_repository"
-    store = services.live_state_repository.load_snapshot(account_id=account_id)
-    balance = store.balances.get("USDT")
-    if balance is None:
-        return "missing_balance_snapshot"
-    if balance.equity <= 0:
-        return "invalid_balance_snapshot"
-    return "available"
-
-
-def market_data_readiness_status(result) -> str:
-    if result.trading_allowed:
-        return result.reason
-    parts = [result.reason]
-    if result.missing_symbols:
-        parts.append(f"missing={'|'.join(result.missing_symbols)}")
-    if result.stale_symbols:
-        parts.append(f"stale={'|'.join(result.stale_symbols)}")
-    return ":".join(parts)

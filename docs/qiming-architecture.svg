@@ -1,162 +1,491 @@
-<svg width="1600" height="1080" viewBox="0 0 1600 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="1080" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#f8fbfa"/>
-      <stop offset="0.48" stop-color="#edf6fb"/>
-      <stop offset="1" stop-color="#fff7ed"/>
-    </linearGradient>
-    <linearGradient id="okxPanel" x1="80" y1="150" x2="340" y2="430" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#111820"/>
-      <stop offset="1" stop-color="#303d48"/>
-    </linearGradient>
-    <linearGradient id="corePanel" x1="420" y1="130" x2="1110" y2="860" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#eff7f2"/>
-    </linearGradient>
-    <filter id="shadow" x="-16%" y="-16%" width="132%" height="132%">
-      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#17212b" flood-opacity="0.15"/>
-    </filter>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
-      <path d="M0 0L10 5L0 10Z" fill="#536574"/>
-    </marker>
-    <style>
-      .title{font:700 40px Arial, sans-serif;fill:#17212b}
-      .subtitle{font:500 17px Arial, sans-serif;fill:#667683}
-      .groupTitle{font:700 20px Arial, sans-serif;fill:#253440}
-      .groupText{font:600 13px Arial, sans-serif;fill:#6b7a86}
-      .cardTitle{font:700 18px Arial, sans-serif;fill:#202e39}
-      .cardText{font:600 13px Arial, sans-serif;fill:#63727f}
-      .whiteTitle{font:700 21px Arial, sans-serif;fill:#ffffff}
-      .whiteText{font:600 14px Arial, sans-serif;fill:#d5dee6}
-      .tag{font:700 12px Arial, sans-serif;fill:#ffffff}
-      .box{filter:url(#shadow);stroke:#d9e3e9;stroke-width:1.4}
-      .lane{stroke:#dbe7ee;stroke-width:1.2}
-      .flow{stroke:#536574;stroke-width:2.8;marker-end:url(#arrow)}
-      .flowSoft{stroke:#8c9aa6;stroke-width:2.2;stroke-dasharray:8 9;marker-end:url(#arrow)}
-      .flowRisk{stroke:#cf5d48;stroke-width:2.8;marker-end:url(#arrow)}
-      .chip{stroke-width:1.2}
-    </style>
-  </defs>
-
-  <rect width="1600" height="1080" rx="36" fill="url(#bg)"/>
-
-  <text x="74" y="76" class="title">Qiming Quant Architecture</text>
-  <text x="76" y="108" class="subtitle">Personal OKX USDT perpetual system. Data first, local audit, fail closed before live execution.</text>
-
-  <rect x="72" y="148" width="300" height="292" rx="30" fill="url(#okxPanel)" class="box"/>
-  <text x="112" y="202" class="whiteTitle">OKX Exchange</text>
-  <text x="112" y="232" class="whiteText">REST API</text>
-  <text x="112" y="258" class="whiteText">Public WebSocket</text>
-  <text x="112" y="284" class="whiteText">Private WebSocket</text>
-  <circle cx="292" cy="220" r="32" fill="#f7fbfd"/>
-  <rect x="274" y="202" width="14" height="14" fill="#151b22"/>
-  <rect x="294" y="202" width="14" height="14" fill="#151b22"/>
-  <rect x="274" y="222" width="14" height="14" fill="#151b22"/>
-  <rect x="294" y="222" width="14" height="14" fill="#151b22"/>
-  <rect x="112" y="330" width="210" height="46" rx="23" fill="#455361"/>
-  <text x="136" y="359" class="tag">candles  balance  fills</text>
-
-  <rect x="72" y="548" width="300" height="212" rx="30" fill="#ffffff" class="box"/>
-  <text x="116" y="604" class="groupTitle">Operator</text>
-  <text x="116" y="634" class="cardText">CLI commands</text>
-  <text x="116" y="660" class="cardText">env config check</text>
-  <text x="116" y="686" class="cardText">manual pause</text>
-  <path d="M280 612h42M301 591v42" stroke="#3d8b66" stroke-width="6" stroke-linecap="round"/>
-
-  <rect x="430" y="146" width="670" height="724" rx="36" fill="url(#corePanel)" class="box"/>
-  <text x="470" y="202" class="groupTitle">Local Core</text>
-  <text x="470" y="229" class="groupText">All strategy, state and safety decisions happen locally before any live action.</text>
-
-  <rect x="470" y="268" width="250" height="132" rx="22" fill="#e6f3ff" stroke="#bad7eb" class="lane"/>
-  <text x="520" y="314" class="cardTitle">OKX Gateway</text>
-  <text x="520" y="342" class="cardText">signer  REST client</text>
-  <text x="520" y="366" class="cardText">WS runtime  mapper</text>
-  <path d="M494 324h34M494 342h54M494 360h42" stroke="#3f83a8" stroke-width="4" stroke-linecap="round"/>
-
-  <rect x="780" y="268" width="250" height="132" rx="22" fill="#eef6ff" stroke="#c5daee" class="lane"/>
-  <text x="834" y="314" class="cardTitle">Market Data</text>
-  <text x="834" y="342" class="cardText">1m candle sync</text>
-  <text x="834" y="366" class="cardText">gap repair  aggregate</text>
-  <path d="M804 358c18-36 38-36 56 0s38 36 56 0" stroke="#4d86bd" stroke-width="4" fill="none" stroke-linecap="round"/>
-
-  <rect x="470" y="454" width="250" height="132" rx="22" fill="#fff5dc" stroke="#ead49b" class="lane"/>
-  <text x="520" y="500" class="cardTitle">Strategy Lab</text>
-  <text x="520" y="528" class="cardText">signals only</text>
-  <text x="520" y="552" class="cardText">backtest  simulation</text>
-  <path d="M496 542h90l22-42 34 64 22-38h48" stroke="#b98020" stroke-width="4" fill="none" stroke-linecap="round"/>
-
-  <rect x="780" y="454" width="250" height="132" rx="22" fill="#f0eaff" stroke="#d3c5ef" class="lane"/>
-  <text x="834" y="500" class="cardTitle">Risk Engine</text>
-  <text x="834" y="528" class="cardText">size cap  daily loss</text>
-  <text x="834" y="552" class="cardText">symbol lease  policy</text>
-  <path d="M904 478l44 16v32c0 30-22 44-44 54-22-10-44-24-44-54v-32l44-16z" stroke="#7963b6" stroke-width="4" fill="none"/>
-
-  <rect x="470" y="640" width="250" height="132" rx="22" fill="#eaf8ea" stroke="#bee2bd" class="lane"/>
-  <text x="520" y="686" class="cardTitle">Live State</text>
-  <text x="520" y="714" class="cardText">ticker  balance</text>
-  <text x="520" y="738" class="cardText">position  order  fill</text>
-  <circle cx="500" cy="704" r="18" stroke="#4f915c" stroke-width="4"/>
-  <path d="M494 704l8 8 16-22" stroke="#4f915c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-
-  <rect x="780" y="640" width="250" height="132" rx="22" fill="#fff1ec" stroke="#efc6b9" class="lane"/>
-  <text x="834" y="686" class="cardTitle">Execution Core</text>
-  <text x="834" y="714" class="cardText">order factory</text>
-  <text x="834" y="738" class="cardText">dry-run  demo order</text>
-  <rect x="862" y="664" width="46" height="54" rx="9" stroke="#cf5d48" stroke-width="4"/>
-  <path d="M872 664v-15c0-16 11-27 27-27s27 11 27 27v15" stroke="#cf5d48" stroke-width="4" fill="none"/>
-
-  <rect x="430" y="918" width="670" height="78" rx="26" fill="#ffffff" class="box"/>
-  <text x="480" y="965" class="groupTitle">Local Storage</text>
-  <text x="640" y="965" class="cardText">candles  instruments  funding  marks  orders  fills  safety  runtime logs</text>
-  <ellipse cx="456" cy="954" rx="18" ry="9" stroke="#4b8f72" stroke-width="4"/>
-  <path d="M438 954v24c0 5 8 9 18 9s18-4 18-9v-24" stroke="#4b8f72" stroke-width="4" fill="none"/>
-
-  <rect x="1188" y="148" width="338" height="196" rx="30" fill="#ffffff" class="box"/>
-  <text x="1234" y="204" class="groupTitle">Pre-live Readiness</text>
-  <text x="1234" y="234" class="cardText">instrument specs</text>
-  <text x="1234" y="260" class="cardText">fresh mark price</text>
-  <text x="1234" y="286" class="cardText">USDT balance snapshot</text>
-  <path d="M1460 206l42 24v48l-42 24-42-24v-48l42-24z" stroke="#3d8b66" stroke-width="5" fill="none"/>
-  <path d="M1442 256l18 18 34-48" stroke="#3d8b66" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-
-  <rect x="1188" y="410" width="338" height="196" rx="30" fill="#ffffff" class="box"/>
-  <text x="1234" y="466" class="groupTitle">Trading Gate</text>
-  <text x="1234" y="496" class="cardText">emergency pause</text>
-  <text x="1234" y="522" class="cardText">equity drawdown</text>
-  <text x="1234" y="548" class="cardText">REST reconciliation</text>
-  <path d="M1458 456l54 32v60l-54 32-54-32v-60l54-32z" stroke="#cf5d48" stroke-width="5" fill="none"/>
-  <path d="M1432 548h84" stroke="#cf5d48" stroke-width="6" stroke-linecap="round"/>
-
-  <rect x="1188" y="672" width="338" height="180" rx="30" fill="#ffffff" class="box"/>
-  <text x="1234" y="728" class="groupTitle">Live Boundary</text>
-  <text x="1234" y="758" class="cardText">no automatic live loop yet</text>
-  <text x="1234" y="784" class="cardText">BTC/ETH small-size only</text>
-  <text x="1234" y="810" class="cardText">demo order CLI first</text>
-  <circle cx="1460" cy="760" r="42" fill="#fff1ec" stroke="#cf5d48" stroke-width="5"/>
-  <path d="M1438 760h44M1460 738v44" stroke="#cf5d48" stroke-width="6" stroke-linecap="round"/>
-
-  <path d="M372 248C402 248 402 334 470 334" class="flow"/>
-  <path d="M372 654C404 654 402 708 470 708" class="flow"/>
-  <path d="M720 334H780" class="flow"/>
-  <path d="M905 400V454" class="flow"/>
-  <path d="M780 520H720" class="flow"/>
-  <path d="M720 706H780" class="flow"/>
-  <path d="M595 586V640" class="flow"/>
-  <path d="M905 586V640" class="flowRisk"/>
-  <path d="M595 772V918" class="flowSoft"/>
-  <path d="M905 772V918" class="flowSoft"/>
-  <path d="M1030 706C1108 706 1110 508 1188 508" class="flowRisk"/>
-  <path d="M1100 246C1144 246 1144 246 1188 246" class="flowSoft"/>
-  <path d="M1357 344V410" class="flowRisk"/>
-  <path d="M1357 606V672" class="flowRisk"/>
-  <path d="M1188 760C1140 760 1138 966 1100 966" class="flowSoft"/>
-
-  <rect x="82" y="918" width="260" height="56" rx="28" fill="#17212b"/>
-  <text x="132" y="953" class="tag">DATA FIRST</text>
-  <rect x="1168" y="918" width="260" height="56" rx="28" fill="#3d8b66"/>
-  <text x="1218" y="953" class="tag">LOCAL AUDIT</text>
-  <rect x="82" y="994" width="260" height="56" rx="28" fill="#cf5d48"/>
-  <text x="132" y="1029" class="tag">FAIL CLOSED</text>
-  <rect x="1168" y="994" width="260" height="56" rx="28" fill="#536574"/>
-  <text x="1218" y="1029" class="tag">ONE BOT PER SUBACCOUNT</text>
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="767.7pt" height="457.92pt" viewBox="0 0 767.7 457.92" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-06-04T15:41:32.987229</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.9.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 457.92 
+L 767.7 457.92 
+L 767.7 0 
+L 0 0 
+z
+" style="fill: #fbfcfd"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 47.1249 189.93024 
+L 163.1331 189.93024 
+Q 181.9656 189.93024 181.9656 178.84224 
+L 181.9656 92.79936 
+Q 181.9656 81.71136 163.1331 81.71136 
+L 47.1249 81.71136 
+Q 28.2924 81.71136 28.2924 92.79936 
+L 28.2924 178.84224 
+Q 28.2924 189.93024 47.1249 189.93024 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #eff4f8; stroke: #b9c7d3; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 47.1249 331.85664 
+L 163.1331 331.85664 
+Q 181.9656 331.85664 181.9656 320.76864 
+L 181.9656 234.72576 
+Q 181.9656 223.63776 163.1331 223.63776 
+L 47.1249 223.63776 
+Q 28.2924 223.63776 28.2924 234.72576 
+L 28.2924 320.76864 
+Q 28.2924 331.85664 47.1249 331.85664 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #f7f1fb; stroke: #d7c2e8; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 227.9169 154.44864 
+L 358.9911 154.44864 
+Q 377.8236 154.44864 377.8236 143.36064 
+L 377.8236 83.92896 
+Q 377.8236 72.84096 358.9911 72.84096 
+L 227.9169 72.84096 
+Q 209.0844 72.84096 209.0844 83.92896 
+L 209.0844 143.36064 
+Q 209.0844 154.44864 227.9169 154.44864 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #f4f7fa; stroke: #d2dce3; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 227.9169 247.58784 
+L 358.9911 247.58784 
+Q 377.8236 247.58784 377.8236 236.49984 
+L 377.8236 177.06816 
+Q 377.8236 165.98016 358.9911 165.98016 
+L 227.9169 165.98016 
+Q 209.0844 165.98016 209.0844 177.06816 
+L 209.0844 236.49984 
+Q 209.0844 247.58784 227.9169 247.58784 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #ffffff; stroke: #d2dce3; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 227.9169 367.33824 
+L 358.9911 367.33824 
+Q 377.8236 367.33824 377.8236 356.25024 
+L 377.8236 287.94816 
+Q 377.8236 276.86016 358.9911 276.86016 
+L 227.9169 276.86016 
+Q 209.0844 276.86016 209.0844 287.94816 
+L 209.0844 356.25024 
+Q 209.0844 367.33824 227.9169 367.33824 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #f4f7fa; stroke: #d2dce3; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 431.3079 145.57824 
+L 547.3161 145.57824 
+Q 566.1486 145.57824 566.1486 134.49024 
+L 566.1486 70.62336 
+Q 566.1486 59.53536 547.3161 59.53536 
+L 431.3079 59.53536 
+Q 412.4754 59.53536 412.4754 70.62336 
+L 412.4754 134.49024 
+Q 412.4754 145.57824 431.3079 145.57824 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #d8edf7; stroke: #d2dce3; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 431.3079 243.15264 
+L 547.3161 243.15264 
+Q 566.1486 243.15264 566.1486 232.06464 
+L 566.1486 168.19776 
+Q 566.1486 157.10976 547.3161 157.10976 
+L 431.3079 157.10976 
+Q 412.4754 157.10976 412.4754 168.19776 
+L 412.4754 232.06464 
+Q 412.4754 243.15264 431.3079 243.15264 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #dff1df; stroke: #d2dce3; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 431.3079 345.16224 
+L 547.3161 345.16224 
+Q 566.1486 345.16224 566.1486 334.07424 
+L 566.1486 270.20736 
+Q 566.1486 259.11936 547.3161 259.11936 
+L 431.3079 259.11936 
+Q 412.4754 259.11936 412.4754 270.20736 
+L 412.4754 334.07424 
+Q 412.4754 345.16224 431.3079 345.16224 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #ffe6d6; stroke: #d2dce3; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 612.0999 189.93024 
+L 720.5751 189.93024 
+Q 739.4076 189.93024 739.4076 178.84224 
+L 739.4076 110.54016 
+Q 739.4076 99.45216 720.5751 99.45216 
+L 612.0999 99.45216 
+Q 593.2674 99.45216 593.2674 110.54016 
+L 593.2674 178.84224 
+Q 593.2674 189.93024 612.0999 189.93024 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #fff1ed; stroke: #efb5a8; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 612.0999 305.24544 
+L 720.5751 305.24544 
+Q 739.4076 305.24544 739.4076 294.15744 
+L 739.4076 225.85536 
+Q 739.4076 214.76736 720.5751 214.76736 
+L 612.0999 214.76736 
+Q 593.2674 214.76736 593.2674 225.85536 
+L 593.2674 294.15744 
+Q 593.2674 305.24544 612.0999 305.24544 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #fff7f4; stroke: #efb5a8; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 612.0999 407.25504 
+L 720.5751 407.25504 
+Q 739.4076 407.25504 739.4076 396.16704 
+L 739.4076 341.17056 
+Q 739.4076 330.08256 720.5751 330.08256 
+L 612.0999 330.08256 
+Q 593.2674 330.08256 593.2674 341.17056 
+L 593.2674 396.16704 
+Q 593.2674 407.25504 612.0999 407.25504 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #f7fbf7; stroke: #bedcc6; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 177.414351 133.61863 
+Q 195.524231 124.733177 212.279077 116.51256 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 207.359866 116.475591 
+L 212.279077 116.51256 
+L 209.297975 120.425747 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 175.611562 273.530728 
+Q 195.524996 242.265606 214.627594 212.273538 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 210.408282 214.802848 
+L 214.627594 212.273538 
+L 214.119454 217.166574 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 293.454 154.126287 
+Q 293.454 160.212988 293.454 164.790343 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 295.654 160.390343 
+L 293.454 164.790343 
+L 291.254 160.390343 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 371.08036 202.341626 
+Q 395.150249 155.777751 418.527048 110.554678 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 414.552238 113.453107 
+L 418.527048 110.554678 
+L 418.460905 115.473583 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 373.769371 206.364681 
+Q 395.152034 204.566187 415.030662 202.894197 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 410.461753 201.070719 
+L 415.030662 202.894197 
+L 410.830535 205.455238 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 371.24772 211.135688 
+Q 395.150296 253.355006 418.309257 294.26087 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 418.055963 289.348046 
+L 418.309257 294.26087 
+L 414.227021 291.515811 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 485.262507 143.190422 
+Q 391.382112 211.219844 298.723908 278.363617 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke-dasharray: 5.4,4.05; stroke-dashoffset: 0; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 303.577712 277.563251 
+L 298.723908 278.363617 
+L 300.995898 274.000354 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke-dasharray: 5.4,4.05; stroke-dashoffset: 0; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 484.437665 238.934192 
+Q 391.383544 260.006277 299.801496 280.745011 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke-dasharray: 5.4,4.05; stroke-dashoffset: 0; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 304.57873 281.91891 
+L 299.801496 280.745011 
+L 303.606956 277.627563 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke-dasharray: 5.4,4.05; stroke-dashoffset: 0; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 484.515368 338.427945 
+Q 391.382572 311.011074 299.697685 284.020445 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke-dasharray: 5.4,4.05; stroke-dashoffset: 0; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 303.297304 287.373466 
+L 299.697685 284.020445 
+L 304.539873 283.152563 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #7c8a96; stroke-dasharray: 5.4,4.05; stroke-dashoffset: 0; stroke: #7c8a96; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_22">
+    <path d="M 558.506265 295.12431 
+Q 579.708211 222.306476 600.488211 150.93781 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke: #2d8a62; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 597.145882 154.547359 
+L 600.488211 150.93781 
+L 601.370452 155.777402 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #2d8a62; stroke: #2d8a62; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_23">
+    <path d="M 666.3375 189.610594 
+Q 666.3375 202.351726 666.3375 213.583513 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke: #cf5d48; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 668.5375 209.183513 
+L 666.3375 213.583513 
+L 664.1375 209.183513 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #cf5d48; stroke: #cf5d48; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="patch_24">
+    <path d="M 666.3375 304.925794 
+Q 666.3375 317.666926 666.3375 328.898713 
+" clip-path="url(#p4e420ff732)" style="fill: none; stroke-dasharray: 5.4,4.05; stroke-dashoffset: 0; stroke: #cf5d48; stroke-width: 1.35; stroke-linecap: round"/>
+    <path d="M 668.5375 324.498713 
+L 666.3375 328.898713 
+L 664.1375 324.498713 
+z
+" clip-path="url(#p4e420ff732)" style="fill: #cf5d48; stroke-dasharray: 5.4,4.05; stroke-dashoffset: 0; stroke: #cf5d48; stroke-width: 1.35; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="fill: #17212b; font: 700 22px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="37.332" y="45.391312" transform="rotate(-0 37.332 45.391312)">Qiming Quant Architecture</text>
+   </g>
+   <g id="text_2">
+    <text style="fill: #5f6f7a; font: 9.5px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="37.332" y="53.151401" transform="rotate(-0 37.332 53.151401)">Local-first OKX perpetual system: read-only live state first, fail-closed safety gates before any execution.</text>
+   </g>
+   <g id="text_3">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="114.149812" transform="rotate(-0 50.8914 114.149812)">OKX REST / WebSocket</text>
+   </g>
+   <g id="text_4">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="129.886425" transform="rotate(-0 50.8914 129.886425)">Historical candles, instruments,</text>
+   </g>
+   <g id="text_5">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="142.392735" transform="rotate(-0 50.8914 142.392735)">funding, mark/index prices.</text>
+   </g>
+   <g id="text_6">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="154.723545" transform="rotate(-0 50.8914 154.723545)">Private account reads for</text>
+   </g>
+   <g id="text_7">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="167.142105" transform="rotate(-0 50.8914 167.142105)">balances, positions, orders and</text>
+   </g>
+   <g id="text_8">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="179.560665" transform="rotate(-0 50.8914 179.560665)">fills.</text>
+   </g>
+   <g id="text_9">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="256.198087" transform="rotate(-0 50.8914 256.198087)">Operator Workstation</text>
+   </g>
+   <g id="text_10">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="271.900575" transform="rotate(-0 50.8914 271.900575)">Modular CLI entrypoint.</text>
+   </g>
+   <g id="text_11">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="284.231385" transform="rotate(-0 50.8914 284.231385)">No automatic real-money trading</text>
+   </g>
+   <g id="text_12">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="50.8914" y="296.649945" transform="rotate(-0 50.8914 296.649945)">command is exposed.</text>
+   </g>
+   <g id="text_13">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="105.401287" transform="rotate(-0 231.6834 105.401287)">AppServices</text>
+   </g>
+   <g id="text_14">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="121.103775" transform="rotate(-0 231.6834 121.103775)">Single service container for</text>
+   </g>
+   <g id="text_15">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="133.434585" transform="rotate(-0 231.6834 133.434585)">command modules.</text>
+   </g>
+   <g id="text_16">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="145.940895" transform="rotate(-0 231.6834 145.940895)">Gateway, repositories, risk</text>
+   </g>
+   <g id="text_17">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="158.271705" transform="rotate(-0 231.6834 158.271705)">settings, runtime logger.</text>
+   </g>
+   <g id="text_18">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="198.418612" transform="rotate(-0 231.6834 198.418612)">Modular CLI</text>
+   </g>
+   <g id="text_19">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="214.155225" transform="rotate(-0 231.6834 214.155225)">market_data, research, live_ops,</text>
+   </g>
+   <g id="text_20">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="226.573785" transform="rotate(-0 231.6834 226.573785)">operator.</text>
+   </g>
+   <g id="text_21">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="238.992345" transform="rotate(-0 231.6834 238.992345)">Handlers orchestrate services and</text>
+   </g>
+   <g id="text_22">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="251.410905" transform="rotate(-0 231.6834 251.410905)">preserve stable output.</text>
+   </g>
+   <g id="text_23">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="309.298612" transform="rotate(-0 231.6834 309.298612)">Local Audit Layer</text>
+   </g>
+   <g id="text_24">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="325.127475" transform="rotate(-0 231.6834 325.127475)">SQLite repositories for candles,</text>
+   </g>
+   <g id="text_25">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="337.453785" transform="rotate(-0 231.6834 337.453785)">instruments, live state and</text>
+   </g>
+   <g id="text_26">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="349.872345" transform="rotate(-0 231.6834 349.872345)">simulation journal.</text>
+   </g>
+   <g id="text_27">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="231.6834" y="362.383155" transform="rotate(-0 231.6834 362.383155)">Runtime JSONL event log.</text>
+   </g>
+   <g id="text_28">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="91.973812" transform="rotate(-0 435.0744 91.973812)">Market Data</text>
+   </g>
+   <g id="text_29">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="107.798175" transform="rotate(-0 435.0744 107.798175)">Sync, range repair, aggregation.</text>
+   </g>
+   <g id="text_30">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="120.128985" transform="rotate(-0 435.0744 120.128985)">Funding, mark and index price</text>
+   </g>
+   <g id="text_31">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="132.547545" transform="rotate(-0 435.0744 132.547545)">snapshots.</text>
+   </g>
+   <g id="text_32">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="189.548212" transform="rotate(-0 435.0744 189.548212)">Research / Simulation</text>
+   </g>
+   <g id="text_33">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="205.372575" transform="rotate(-0 435.0744 205.372575)">Data gate, strategy factory,</text>
+   </g>
+   <g id="text_34">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="217.703385" transform="rotate(-0 435.0744 217.703385)">backtest reports.</text>
+   </g>
+   <g id="text_35">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="230.209695" transform="rotate(-0 435.0744 230.209695)">Simulation journal replaces paper-</text>
+   </g>
+   <g id="text_36">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="242.540505" transform="rotate(-0 435.0744 242.540505)">era naming.</text>
+   </g>
+   <g id="text_37">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="291.557812" transform="rotate(-0 435.0744 291.557812)">Read-only Live Bot</text>
+   </g>
+   <g id="text_38">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="307.382175" transform="rotate(-0 435.0744 307.382175)">live-bot-once syncs public/private</text>
+   </g>
+   <g id="text_39">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="319.712985" transform="rotate(-0 435.0744 319.712985)">state.</text>
+   </g>
+   <g id="text_40">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="332.131545" transform="rotate(-0 435.0744 332.131545)">Persists snapshots and records</text>
+   </g>
+   <g id="text_41">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="435.0744" y="344.46573" transform="rotate(-0 435.0744 344.46573)">gate status.</text>
+   </g>
+   <g id="text_42">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="132.012487" transform="rotate(-0 615.8664 132.012487)">Safety Boundary</text>
+   </g>
+   <g id="text_43">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="147.627225" transform="rotate(-0 615.8664 147.627225)">Emergency pause, equity risk, mark</text>
+   </g>
+   <g id="text_44">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="160.045785" transform="rotate(-0 615.8664 160.045785)">freshness, reconciliation.</text>
+   </g>
+   <g id="text_45">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="172.552095" transform="rotate(-0 615.8664 172.552095)">TradingGateService is fail-closed.</text>
+   </g>
+   <g id="text_46">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="247.205812" transform="rotate(-0 615.8664 247.205812)">Gated Execution Service</text>
+   </g>
+   <g id="text_47">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="262.942425" transform="rotate(-0 615.8664 262.942425)">Order execution and cancellation</text>
+   </g>
+   <g id="text_48">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="275.360985" transform="rotate(-0 615.8664 275.360985)">service exists internally.</text>
+   </g>
+   <g id="text_49">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="287.779545" transform="rotate(-0 615.8664 287.779545)">No automatic live executor is</text>
+   </g>
+   <g id="text_50">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="300.285855" transform="rotate(-0 615.8664 300.285855)">wired to the CLI yet.</text>
+   </g>
+   <g id="text_51">
+    <text style="fill: #17212b; font: 700 10px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="362.521012" transform="rotate(-0 615.8664 362.521012)">Next Live Roadmap</text>
+   </g>
+   <g id="text_52">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="378.257625" transform="rotate(-0 615.8664 378.257625)">Read-only loop -&gt; dry-run intents</text>
+   </g>
+   <g id="text_53">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="390.768435" transform="rotate(-0 615.8664 390.768435)">-&gt; OKX simulated trading -&gt; small</text>
+   </g>
+   <g id="text_54">
+    <text style="fill: #5f6f7a; font: 7.2px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="615.8664" y="403.094745" transform="rotate(-0 615.8664 403.094745)">live pilot.</text>
+   </g>
+   <g id="text_55">
+    <text style="fill: #7c8a96; font: 6.7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="195.525" y="115.417815" transform="rotate(-0 195.525 115.417815)">REST/WS adapters</text>
+   </g>
+   <g id="text_56">
+    <text style="fill: #7c8a96; font: 6.7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="195.525" y="232.950615" transform="rotate(-0 195.525 232.950615)">commands</text>
+   </g>
+   <g id="text_57">
+    <text style="fill: #7c8a96; font: 6.7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="395.1495" y="146.385699" transform="rotate(-0 395.1495 146.385699)">sync</text>
+   </g>
+   <g id="text_58">
+    <text style="fill: #7c8a96; font: 6.7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="395.1495" y="195.251415" transform="rotate(-0 395.1495 195.251415)">research</text>
+   </g>
+   <g id="text_59">
+    <text style="fill: #7c8a96; font: 6.7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="395.1495" y="244.038615" transform="rotate(-0 395.1495 244.038615)">live ops</text>
+   </g>
+   <g id="text_60">
+    <text style="fill: #7c8a96; font: 6.7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="391.383" y="201.904215" transform="rotate(-0 391.383 201.904215)">persist</text>
+   </g>
+   <g id="text_61">
+    <text style="fill: #2d8a62; font: 6.7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="579.708" y="212.913699" transform="rotate(-0 579.708 212.913699)">evaluate gate</text>
+   </g>
+   <g id="text_62">
+    <text style="fill: #cf5d48; font: 6.7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="666.3375" y="192.955299" transform="rotate(-0 666.3375 192.955299)">blocked by default</text>
+   </g>
+   <g id="text_63">
+    <text style="fill: #5f6f7a; font: 7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="383.85" y="424.853119" transform="rotate(-0 383.85 424.853119)">Figure contract: schematic-led composite. Evidence chain: OKX reads -&gt; modular CLI/AppServices -&gt; local data/research/live state -&gt; fail-closed gate -&gt; deferred execution roadmap.</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p4e420ff732">
+   <rect x="7.2" y="7.2" width="753.3" height="443.52"/>
+  </clipPath>
+ </defs>
 </svg>

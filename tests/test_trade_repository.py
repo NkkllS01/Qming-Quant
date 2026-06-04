@@ -104,3 +104,9 @@ def test_trade_repository_replaces_existing_simulation_run_snapshot() -> None:
     assert repo.list_fills("sim-run-1") == []
     assert repo.list_positions("sim-run-1") == []
     assert repo.list_journal("sim-run-1") == []
+
+
+def test_trade_repository_uses_simulation_journal_table_name() -> None:
+    repo = TradeRepository("sqlite:///:memory:")
+
+    assert repo.journal.name == "simulation_journal"

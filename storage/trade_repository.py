@@ -42,9 +42,8 @@ class TradeRepository:
             Column("leverage", String, nullable=False),
             Column("updated_at", DateTime(timezone=True), nullable=False),
         )
-        # Kept for backward compatibility with existing local SQLite databases.
         self.journal = Table(
-            "paper_journal",
+            "simulation_journal",
             self.metadata,
             Column("run_id", String, primary_key=True),
             Column("event_index", String, primary_key=True),

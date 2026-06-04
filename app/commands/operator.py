@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 
-from app.commands.live_ops import evaluate_cli_trading_gate
 from app.commands.runtime import record_runtime_event
+from app.live_services import evaluate_cli_trading_gate
 from app.services import AppServices
 
 
