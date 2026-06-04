@@ -9,3 +9,4 @@ trade.db
 logs/
 test-runtime-events.jsonl
 test-runtime-events-phase4-*.jsonl
+test-runtime-events-live-bot*.jsonl
