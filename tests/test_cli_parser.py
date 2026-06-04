@@ -17,10 +17,15 @@ COMMANDS = [
     ["sim-run"],
     ["live-sync"],
     ["live-bot-once"],
+    ["live-bot-run", "--max-iterations", "1", "--interval-seconds", "0"],
     ["live-reconcile"],
     ["trading-gate"],
     ["operator-status"],
     ["live-order-check", "--symbol", "BTC-USDT-SWAP", "--side", "buy", "--position-action", "open", "--size", "0.1"],
+    ["live-simulated-execute", "--symbol", "BTC-USDT-SWAP", "--side", "buy", "--position-action", "open", "--size", "0.1"],
+    ["live-simulated-cancel", "--symbol", "BTC-USDT-SWAP", "--order-id", "okx-1"],
+    ["live-small-execute", "--symbol", "BTC-USDT-SWAP", "--side", "buy", "--position-action", "open", "--size", "0.01"],
+    ["live-strategy-dry-run", "--symbol", "BTC-USDT-SWAP"],
     ["prelive-readiness"],
     ["emergency-pause"],
     ["emergency-resume"],
@@ -117,6 +122,9 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     live_sync_args = parser.parse_args(
         ["live-sync", "--symbol", "BTC-USDT-SWAP", "--max-messages", "1", "--public-only"]
     )
+    live_bot_run_args = parser.parse_args(
+        ["live-bot-run", "--symbol", "BTC-USDT-SWAP", "--max-iterations", "2", "--interval-seconds", "0"]
+    )
     live_order_check_args = parser.parse_args(
         [
             "live-order-check",
@@ -130,8 +138,50 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
             "0.1",
         ]
     )
+    live_simulated_execute_args = parser.parse_args(
+        [
+            "live-simulated-execute",
+            "--enable-simulated-execution",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.1",
+        ]
+    )
+    live_small_execute_args = parser.parse_args(
+        [
+            "live-small-execute",
+            "--enable-live-trading",
+            "--confirm-first-live-order",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--side",
+            "buy",
+            "--position-action",
+            "open",
+            "--size",
+            "0.01",
+        ]
+    )
+    live_simulated_cancel_args = parser.parse_args(
+        [
+            "live-simulated-cancel",
+            "--enable-simulated-execution",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--order-id",
+            "okx-1",
+        ]
+    )
     prelive_readiness_args = parser.parse_args(
         ["prelive-readiness", "--account-id", "okx_sub_main", "--symbol", "BTC-USDT-SWAP"]
+    )
+    live_strategy_dry_run_args = parser.parse_args(
+        ["live-strategy-dry-run", "--symbol", "BTC-USDT-SWAP", "--strategy", "ma-crossover"]
     )
     run_log_tail_args = parser.parse_args(["run-log-tail", "--limit", "5"])
     operator_status_args = parser.parse_args(["operator-status", "--account-id", "okx_sub_main", "--skip-gate"])
@@ -178,11 +228,25 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert live_sync_args.symbol == ["BTC-USDT-SWAP"]
     assert live_sync_args.max_messages == 1
     assert live_sync_args.public_only is True
+    assert live_bot_run_args.command == "live-bot-run"
+    assert live_bot_run_args.symbol == ["BTC-USDT-SWAP"]
+    assert live_bot_run_args.max_iterations == 2
+    assert live_bot_run_args.interval_seconds == 0
     assert live_order_check_args.command == "live-order-check"
     assert live_order_check_args.symbol == "BTC-USDT-SWAP"
+    assert live_simulated_execute_args.command == "live-simulated-execute"
+    assert live_simulated_execute_args.enable_simulated_execution is True
+    assert live_simulated_cancel_args.command == "live-simulated-cancel"
+    assert live_simulated_cancel_args.enable_simulated_execution is True
+    assert live_simulated_cancel_args.order_id == "okx-1"
+    assert live_small_execute_args.command == "live-small-execute"
+    assert live_small_execute_args.enable_live_trading is True
+    assert live_small_execute_args.confirm_first_live_order is True
     assert prelive_readiness_args.command == "prelive-readiness"
     assert prelive_readiness_args.account_id == "okx_sub_main"
     assert prelive_readiness_args.symbol == ["BTC-USDT-SWAP"]
+    assert live_strategy_dry_run_args.command == "live-strategy-dry-run"
+    assert live_strategy_dry_run_args.strategy == "ma-crossover"
     assert run_log_tail_args.command == "run-log-tail"
     assert run_log_tail_args.limit == 5
     assert operator_status_args.command == "operator-status"

@@ -5,8 +5,10 @@ __pycache__/
 pytest-cache-files-*/
 trade.db
 *.db
+*.db-journal
 .env
 logs/
 test-runtime-events.jsonl
+test-runtime-events-*.jsonl
 test-runtime-events-phase4-*.jsonl
 test-runtime-events-live-bot*.jsonl

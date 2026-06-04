@@ -34,22 +34,22 @@ The OKX integration is organized as an API Gateway:
 
 Still intentionally not exposed:
 
-- A CLI command for real-money live order placement
 - An always-on live trading loop
 - A production scheduler/daemon
-- Full private fill-event lifecycle reconciliation
+- Ungated or automatic real-money order placement
+- Production-grade private fill-event lifecycle monitoring beyond REST backfill and local reconciliation
 
-Do not expose live trading until data sync, backtesting, simulation, risk checks, reconciliation, small-size constraints, and operator emergency controls are reviewed together.
+Do not run real-money trading without synced data, backtesting, simulation, risk checks, reconciliation, small-size constraints, runtime logging, and operator emergency controls reviewed together.
 
 ## Live Trading Roadmap
 
-The project is not ready to run automatic real-money trading. The missing pieces are deliberately tracked as a staged plan rather than partially wired into the current CLI:
+The project now has a guarded progression toward live trading, but it is still not ready for unattended automatic real-money trading:
 
-- Always-on read-only live bot: add a reconnecting loop with heartbeat, backoff, graceful shutdown, interval control, and persistent run status. It must sync public/private state, backfill fills, reconcile REST snapshots, evaluate the trading gate, and write runtime logs without placing or canceling orders.
-- Strategy-to-intent dry run: run live strategies on fresh local candles, mark prices, and funding context; convert signals into `OrderIntent`; pass order policy, risk checks, and trading gate; write an intent journal and runtime audit events without calling OKX order placement.
-- OKX simulated trading executor: expose a separate simulated-only execution path that requires `OKX_SIMULATED_TRADING=1`, an explicit enable flag, all pre-live readiness checks green, local order snapshot persistence, and post-submit reconciliation.
-- Small live pilot: expose real-money trading only behind an explicit live enable flag, symbol allowlist, tiny position limits, per-trade and daily risk caps, max order count, emergency pause, full audit logging, and manual first-run confirmation.
-- Production operations: add service runner/daemon guidance, log rotation, database backup, alerting, operator runbook, restart recovery, and a controlled simulated-to-small-live acceptance checklist.
+- Always-on read-only live bot: `live-bot-run` loops through live sync, REST fill backfill, reconciliation through the trading gate, runtime logging, and disconnect recovery without placing or canceling orders.
+- Strategy-to-intent dry run: `live-strategy-dry-run` converts local strategy signals into `OrderIntent` records, evaluates portfolio risk/order policy/trading gate, writes an intent journal, and never calls OKX order placement.
+- OKX simulated trading executor: `live-simulated-execute` requires `OKX_SIMULATED_TRADING=1`, an explicit enable flag, green pre-live readiness, local order snapshot persistence, and post-submit reconciliation.
+- Small live pilot: `live-small-execute` requires explicit live enablement, first-order confirmation, tiny size limits, active-order limits, pre-live readiness, the trading gate, audit logging, local snapshots, and reconciliation.
+- Production operations still missing: service runner/daemon guidance, log rotation, database backup, alerting, operator runbook, restart recovery drills, and a controlled simulated-to-small-live acceptance checklist.
 
 ## Setup
 
@@ -256,6 +256,15 @@ python -m app.main live-bot-once --symbol BTC-USDT-SWAP --skip-gate
 
 `live-bot-once` runs live state sync, persists the local snapshot, optionally evaluates the trading gate, and writes a runtime audit event. It is intentionally read-only: it does not place or cancel orders.
 
+Run the read-only live bot loop:
+
+```powershell
+python -m app.main live-bot-run --symbol BTC-USDT-SWAP --interval-seconds 5
+python -m app.main live-bot-run --symbol BTC-USDT-SWAP --max-iterations 3 --interval-seconds 0
+```
+
+`live-bot-run` repeats the same read-only pass, backfills recent REST fills, evaluates reconciliation through the trading gate, records blocked reasons, and continues after transient WebSocket disconnects. It is still read-only and does not place or cancel orders.
+
 Backfill recent private fills from OKX REST into local live state:
 
 ```powershell
@@ -290,6 +299,31 @@ python -m app.main live-order-check --symbol BTC-USDT-SWAP --side buy --position
 When local instrument specs are configured, live order checks also require a synced live instrument row and verify `size` against OKX `minSz` and `lotSz` before the trading gate runs. Run `sync-instruments` before using live checks or live execution.
 If a local active live order already uses the same `client_order_id` for the same symbol, live checks fail with `duplicate_client_order_id` before the trading gate runs. This protects retries and restarts from submitting the same logical order twice.
 
+Run the live strategy-to-intent dry-run pipeline:
+
+```powershell
+python -m app.main live-strategy-dry-run --symbol BTC-USDT-SWAP --timeframe 15m --strategy ma-crossover
+```
+
+`live-strategy-dry-run` reads local candles plus local mark/funding context, generates strategy signals, converts them into `OrderIntent` records, evaluates portfolio risk, order policy, and the trading gate, then writes a local intent journal and runtime log. It does not place or cancel orders.
+
+Submit to OKX simulated trading only:
+
+```powershell
+python -m app.main live-simulated-execute --enable-simulated-execution --symbol BTC-USDT-SWAP --side buy --position-action open --size 0.01 --client-order-id sim-client-1
+python -m app.main live-simulated-cancel --enable-simulated-execution --symbol BTC-USDT-SWAP --order-id sim-okx-1
+```
+
+`live-simulated-execute` requires `OKX_SIMULATED_TRADING=1`, the explicit enable flag, green pre-live readiness, a passing trading gate, local order snapshot persistence, and post-submit reconciliation. `live-simulated-cancel` is also simulated-only and records a local `cancel_requested` snapshot with runtime audit data.
+
+Run the small real-money pilot path:
+
+```powershell
+python -m app.main live-small-execute --enable-live-trading --confirm-first-live-order --symbol BTC-USDT-SWAP --side buy --position-action open --size 0.01 --client-order-id live-client-1
+```
+
+`live-small-execute` is off by default, refuses simulated-trading mode, requires explicit live enablement plus first-order confirmation, enforces a tiny `--max-live-size`, limits local active live orders, checks pre-live readiness, passes the same trading gate, records runtime audit data, persists the local snapshot, and reconciles after submission.
+
 Check local pre-live readiness:
 
 ```powershell
@@ -317,7 +351,7 @@ Get-Content logs/qiming-events.jsonl
 
 `operator-status` summarizes manual pause state and the latest runtime event for quick server checks. By default it is a local-only pause/log check; use `--include-gate` when you also want to evaluate the trading gate, including REST reconciliation. The CLI writes JSONL runtime events for simulation runs, live sync/reconcile checks, trading-gate decisions, live order dry-runs, and manual emergency pause/resume commands. Set `RUN_LOG_PATH` to an empty value to disable this local audit log.
 
-The codebase includes a minimal OKX REST order adapter and a live execution service that must pass local order policy and the trading gate before calling OKX. The default live order policy only allows BTC/ETH USDT swap market orders in isolated mode; open orders must not be reduce-only, while close/reduce orders must be reduce-only. Successful submissions are recorded into the local live order snapshot for restart recovery and reconciliation. If OKX returns a per-order rejection code, the service reports `exchange_rejected` and does not record a submitted local order. The same service can request cancellation by OKX order id or client order id and marks matching local orders as `cancel_requested` when OKX accepts the request; cancel rejections do not modify local order state. There is intentionally no real-money live order CLI yet.
+The codebase includes a minimal OKX REST order adapter and a live execution service that must pass local order policy and the trading gate before calling OKX. The default live order policy only allows BTC/ETH USDT swap market orders in isolated mode; open orders must not be reduce-only, while close/reduce orders must be reduce-only. Successful submissions are recorded into the local live order snapshot for restart recovery and reconciliation. If OKX returns a per-order rejection code, the service reports `exchange_rejected` and does not record a submitted local order. The same service can request cancellation by OKX order id or client order id and marks matching local orders as `cancel_requested` when OKX accepts the request; cancel rejections do not modify local order state. Real-money execution is limited to the explicit small-live pilot command and remains blocked by default.
 When OKX private WebSocket order updates arrive, the live state store preserves the original local `account_id`, `bot_id`, `strategy_id`, and `run_id` for matching `order_id` or `client_order_id`, so exchange lifecycle updates and derived fills do not erase strategy lineage.
 
 The current backtest engine supports a single-position K-line lifecycle with:

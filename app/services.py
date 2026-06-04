@@ -9,6 +9,7 @@ from app.run_log import RuntimeEventLogger
 from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig, WebsocketsConnector
+from storage.live_intent_repository import LiveIntentRepository
 from storage.live_repository import LiveStateRepository
 from storage.repositories import (
     CandleRepository,
@@ -34,6 +35,8 @@ class AppServices:
     live_state_repository: LiveStateRepository | None = None
     safety_repository: SafetyRepository | None = None
     runtime_logger: RuntimeEventLogger | None = None
+    live_intent_repository: LiveIntentRepository | None = None
+    okx_simulated_trading: bool = False
     max_daily_loss: Decimal = Decimal("0.03")
     max_total_drawdown_pause: Decimal = Decimal("0.08")
     default_symbols: list[str] | None = None
@@ -75,6 +78,8 @@ def build_services(settings: Settings | None = None) -> AppServices:
             if settings.run_log_path is not None
             else None
         ),
+        live_intent_repository=LiveIntentRepository(settings.database_url),
+        okx_simulated_trading=settings.okx_simulated_trading,
         max_daily_loss=settings.max_daily_loss,
         max_total_drawdown_pause=settings.max_total_drawdown_pause,
         max_risk_per_trade=settings.max_risk_per_trade,

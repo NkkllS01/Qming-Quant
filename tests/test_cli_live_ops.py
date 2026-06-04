@@ -1,6 +1,7 @@
 from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from tests.cli_fakes import FakeGateway, add_usdt_balance
 from app.main import AppServices, build_parser, run_command
@@ -261,6 +262,82 @@ def test_run_live_sync_command_can_subscribe_private_fills_channel() -> None:
     ]
     restored = live_repo.load_snapshot(account_id="okx_sub_main")
     assert restored.fills["trade-2"].price == Decimal("70200")
+
+
+def test_run_live_bot_run_command_runs_bounded_read_only_loop_and_logs() -> None:
+    class NoOrderGateway(FakeGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.place_order_calls = 0
+            self.cancel_order_calls = 0
+
+        def place_order(self, *args, **kwargs):
+            self.place_order_calls += 1
+            raise AssertionError("live-bot-run must not place orders")
+
+        def cancel_order(self, *args, **kwargs):
+            self.cancel_order_calls += 1
+            raise AssertionError("live-bot-run must not cancel orders")
+
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    safety_repo = SafetyRepository("sqlite:///:memory:")
+    mark_repo = MarkPriceRepository("sqlite:///:memory:")
+    gateway = NoOrderGateway()
+    gateway.rest_positions = []
+    gateway.rest_orders = []
+    connector = FakeWebSocketConnector(
+        [
+            FakeWebSocketSession(
+                [
+                    {
+                        "arg": {"channel": "tickers"},
+                        "data": [{"instId": "BTC-USDT-SWAP", "last": "70000", "ts": "1717200000000"}],
+                    }
+                ]
+            ),
+            FakeWebSocketSession(
+                [
+                    {
+                        "arg": {"channel": "account"},
+                        "data": [{"details": [{"ccy": "USDT", "eq": "1000", "availEq": "900"}], "uTime": "1717200000000"}],
+                    }
+                ]
+            ),
+        ]
+    )
+    log_path = Path(f"test-runtime-events-cli-live-bot-run-{uuid4().hex}.jsonl")
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        websocket_connector=connector,
+        live_state_repository=live_repo,
+        safety_repository=safety_repo,
+        mark_price_repository=mark_repo,
+        runtime_logger=RuntimeEventLogger(log_path),
+    )
+    args = build_parser().parse_args(
+        [
+            "live-bot-run",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--max-iterations",
+            "1",
+            "--interval-seconds",
+            "0",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_bot_run iterations=1 completed=1 failed=0" in output
+    assert "last_gate_status=blocked" in output
+    assert "last_gate_reason=missing_mark_price" in output
+    assert gateway.place_order_calls == 0
+    assert gateway.cancel_order_calls == 0
+    assert live_repo.load_snapshot(account_id="okx_sub_main").balances["USDT"].equity == Decimal("1000")
+    events = RuntimeEventLogger(log_path).tail(limit=2)
+    assert events[0]["command"] == "live-bot-once"
+    assert events[1]["command"] == "live-bot-run"
 
 
 def test_run_live_sync_command_rejects_conflicting_modes() -> None:

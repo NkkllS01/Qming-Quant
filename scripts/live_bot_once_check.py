@@ -27,6 +27,7 @@ class FakeLiveGateway(FakePrivateGateway):
         )
         self.place_order_calls = 0
         self.cancel_order_calls = 0
+        self.recent_fill_calls = 0
 
     def place_order(self, *args, **kwargs):
         self.place_order_calls += 1
@@ -35,6 +36,10 @@ class FakeLiveGateway(FakePrivateGateway):
     def cancel_order(self, *args, **kwargs):
         self.cancel_order_calls += 1
         raise RuntimeError("live_bot_once_check must remain read-only")
+
+    def recent_fills(self, *args, **kwargs):
+        self.recent_fill_calls += 1
+        return []
 
 
 def main() -> None:
