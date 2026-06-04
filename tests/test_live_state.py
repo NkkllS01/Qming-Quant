@@ -353,6 +353,163 @@ def test_okx_live_state_handler_records_fill_with_existing_order_lineage() -> No
     asyncio.run(run())
 
 
+def test_okx_live_state_handler_records_private_fills_channel_with_existing_order_lineage() -> None:
+    async def run() -> None:
+        store = LiveStateStore()
+        store.upsert_order(
+            Order(
+                account_id="okx_sub_main",
+                bot_id="okx_perp_bot_main",
+                strategy_id="btc_trend_15m",
+                symbol="BTC-USDT-SWAP",
+                run_id="live-run",
+                order_id="okx-1",
+                client_order_id="client-1",
+                side="buy",
+                order_type="market",
+                size=Decimal("0.1"),
+                status="submitted",
+            )
+        )
+        handler = OKXLiveStateHandler(store, account_id="okx_sub_main")
+
+        await handler.handle(
+            {
+                "arg": {"channel": "fills", "instId": "BTC-USDT-SWAP"},
+                "data": [
+                    {
+                        "instId": "BTC-USDT-SWAP",
+                        "ordId": "okx-1",
+                        "clOrdId": "client-1",
+                        "tradeId": "trade-2",
+                        "side": "buy",
+                        "fillSz": "0.03",
+                        "fillPx": "70200",
+                        "ts": "1717200003000",
+                    }
+                ],
+            }
+        )
+
+        fill = store.fills["trade-2"]
+        assert fill.account_id == "okx_sub_main"
+        assert fill.bot_id == "okx_perp_bot_main"
+        assert fill.strategy_id == "btc_trend_15m"
+        assert fill.run_id == "live-run"
+        assert fill.client_order_id == "client-1"
+        assert fill.size == Decimal("0.03")
+        assert fill.price == Decimal("70200")
+        assert fill.fee == Decimal("0")
+
+    asyncio.run(run())
+
+
+def test_okx_live_state_handler_uses_order_id_when_fills_channel_client_id_is_zero() -> None:
+    async def run() -> None:
+        store = LiveStateStore()
+        handler = OKXLiveStateHandler(store, account_id="okx_sub_main")
+
+        await handler.handle(
+            {
+                "arg": {"channel": "fills", "instId": "BTC-USDT-SWAP"},
+                "data": [
+                    {
+                        "instId": "BTC-USDT-SWAP",
+                        "ordId": "okx-1",
+                        "clOrdId": "0",
+                        "tradeId": "trade-3",
+                        "side": "sell",
+                        "fillSz": "0.02",
+                        "fillPx": "70300",
+                        "ts": "1717200004000",
+                    }
+                ],
+            }
+        )
+
+        fill = store.fills["trade-3"]
+        assert fill.client_order_id == "okx-1"
+        assert fill.bot_id == "live_sync"
+        assert fill.strategy_id == "exchange_sync"
+
+    asyncio.run(run())
+
+
+def test_order_update_can_upgrade_generic_fill_lineage_from_fills_channel() -> None:
+    async def run() -> None:
+        store = LiveStateStore()
+        store.upsert_order(
+            Order(
+                account_id="okx_sub_main",
+                bot_id="okx_perp_bot_main",
+                strategy_id="btc_trend_15m",
+                symbol="BTC-USDT-SWAP",
+                run_id="live-run",
+                order_id="client-1",
+                client_order_id="client-1",
+                side="buy",
+                order_type="market",
+                size=Decimal("0.1"),
+                status="submitted",
+            )
+        )
+        handler = OKXLiveStateHandler(store, account_id="okx_sub_main")
+
+        await handler.handle(
+            {
+                "arg": {"channel": "fills", "instId": "BTC-USDT-SWAP"},
+                "data": [
+                    {
+                        "instId": "BTC-USDT-SWAP",
+                        "ordId": "okx-1",
+                        "clOrdId": "0",
+                        "tradeId": "trade-4",
+                        "side": "buy",
+                        "fillSz": "0.05",
+                        "fillPx": "70400",
+                        "ts": "1717200005000",
+                    }
+                ],
+            }
+        )
+        assert store.fills["trade-4"].bot_id == "live_sync"
+
+        await handler.handle(
+            {
+                "arg": {"channel": "orders"},
+                "data": [
+                    {
+                        "instId": "BTC-USDT-SWAP",
+                        "ordId": "okx-1",
+                        "clOrdId": "client-1",
+                        "tradeId": "trade-4",
+                        "side": "buy",
+                        "ordType": "market",
+                        "sz": "0.1",
+                        "accFillSz": "0.05",
+                        "fillSz": "0.05",
+                        "fillPx": "70400",
+                        "fillFee": "-0.15",
+                        "avgPx": "70400",
+                        "state": "partially_filled",
+                        "fillTime": "1717200005000",
+                        "cTime": "1717200000000",
+                        "uTime": "1717200005000",
+                    }
+                ],
+            }
+        )
+
+        fill = store.fills["trade-4"]
+        assert fill.bot_id == "okx_perp_bot_main"
+        assert fill.strategy_id == "btc_trend_15m"
+        assert fill.run_id == "live-run"
+        assert fill.client_order_id == "client-1"
+        assert fill.fee == Decimal("-0.15")
+
+    asyncio.run(run())
+
+
 def test_live_state_store_preserves_existing_fill_lineage_on_repeat_update() -> None:
     store = LiveStateStore()
     store.upsert_fill(

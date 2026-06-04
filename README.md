@@ -245,9 +245,11 @@ Manually run read-only live state synchronization:
 
 ```powershell
 python -m app.main live-sync --symbol BTC-USDT-SWAP --max-messages 1 --public-only
+python -m app.main live-sync --symbol BTC-USDT-SWAP --max-messages 1 --private-only --include-fills-channel
 ```
 
 `live-sync` wires the OKX WebSocket runtime, network adapter, live state handler, and live state repository together. It can update and persist ticker, balance, position, order, and fill snapshots, but it does not place or cancel orders. Use `--public-only` for market-data smoke tests before running private account subscriptions.
+The optional `--include-fills-channel` flag subscribes to OKX's private fills channel for direct trade-fill events when the account is eligible. Keep the orders channel as the primary fill source because OKX restricts the fills channel by fee tier.
 
 Compare the local live snapshot with OKX REST state:
 

@@ -197,6 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
     live_sync.add_argument("--max-messages", type=int, default=1)
     live_sync.add_argument("--public-only", action="store_true")
     live_sync.add_argument("--private-only", action="store_true")
+    live_sync.add_argument("--include-fills-channel", action="store_true")
 
     live_reconcile = subparsers.add_parser("live-reconcile", help="Compare local live snapshot with OKX REST state")
     live_reconcile.add_argument("--account-id", default="okx_sub_main")
@@ -555,6 +556,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             account_id=args.account_id,
             symbols=symbols,
             repository=services.live_state_repository,
+            include_fills_channel=args.include_fills_channel,
         )
         result = asyncio.run(
             service.run_once(
@@ -577,6 +579,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"positions={result.positions_count} "
             f"orders={result.orders_count} "
             f"fills={result.fills_count} "
+            f"fills_channel={str(args.include_fills_channel).lower()} "
             f"persisted={str(result.persisted).lower()} "
             f"trading_enabled={str(result.trading_enabled).lower()}"
         )
@@ -589,6 +592,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
                 "symbols": symbols,
                 "public_messages": result.public_messages,
                 "private_messages": result.private_messages,
+                "fills_channel": args.include_fills_channel,
                 "persisted": result.persisted,
                 "trading_enabled": result.trading_enabled,
             },

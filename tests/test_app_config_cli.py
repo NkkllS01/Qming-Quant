@@ -1472,6 +1472,61 @@ def test_run_live_sync_command_public_only_skips_private_connection() -> None:
     assert len(connector.urls) == 1
 
 
+def test_run_live_sync_command_can_subscribe_private_fills_channel() -> None:
+    private_session = FakeWebSocketSession(
+        [
+            {
+                "arg": {"channel": "fills", "instId": "BTC-USDT-SWAP"},
+                "data": [
+                    {
+                        "instId": "BTC-USDT-SWAP",
+                        "ordId": "okx-1",
+                        "clOrdId": "client-1",
+                        "tradeId": "trade-2",
+                        "side": "buy",
+                        "fillSz": "0.03",
+                        "fillPx": "70200",
+                        "ts": "1717200003000",
+                    }
+                ],
+            }
+        ]
+    )
+    connector = FakeWebSocketConnector([private_session])
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        websocket_connector=connector,
+        live_state_repository=live_repo,
+    )
+    args = build_parser().parse_args(
+        [
+            "live-sync",
+            "--symbol",
+            "BTC-USDT-SWAP",
+            "--max-messages",
+            "1",
+            "--private-only",
+            "--include-fills-channel",
+        ]
+    )
+
+    output = run_command(args, services)
+
+    assert "live_sync mode=private" in output
+    assert "fills=1" in output
+    assert "fills_channel=true" in output
+    assert private_session.sent[1]["args"] == [
+        {"channel": "account"},
+        {"channel": "positions", "instType": "SWAP"},
+        {"channel": "orders", "instType": "SWAP"},
+        {"channel": "fills", "instId": "BTC-USDT-SWAP"},
+    ]
+    restored = live_repo.load_snapshot(account_id="okx_sub_main")
+    assert restored.fills["trade-2"].price == Decimal("70200")
+
+
 def test_run_live_sync_command_rejects_conflicting_modes() -> None:
     services = AppServices(
         gateway=FakeGateway(),

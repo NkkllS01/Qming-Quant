@@ -31,6 +31,7 @@ class LiveSyncService:
         symbols: list[str],
         store: LiveStateStore | None = None,
         repository: LiveStateRepository | None = None,
+        include_fills_channel: bool = False,
     ) -> None:
         self.gateway = gateway
         self.connector = connector
@@ -38,6 +39,7 @@ class LiveSyncService:
         self.symbols = symbols
         self.store = store or LiveStateStore()
         self.repository = repository
+        self.include_fills_channel = include_fills_channel
         self.handler = OKXLiveStateHandler(self.store, account_id=account_id)
 
     async def run_once(
@@ -70,7 +72,7 @@ class LiveSyncService:
                 private_ws,
                 connector=self.connector,
                 private=True,
-                channels=_private_channels(),
+                channels=_private_channels(self.symbols, include_fills_channel=self.include_fills_channel),
                 on_message=self.handler.handle,
             )
             private_messages = await runtime.run_once(max_messages=max_messages_per_connection)
@@ -96,9 +98,12 @@ def _public_channels(symbols: list[str]) -> list[dict[str, str]]:
     return [{"channel": "tickers", "instId": symbol} for symbol in symbols]
 
 
-def _private_channels() -> list[dict[str, str]]:
-    return [
+def _private_channels(symbols: list[str], *, include_fills_channel: bool = False) -> list[dict[str, str]]:
+    channels = [
         {"channel": "account"},
         {"channel": "positions", "instType": "SWAP"},
         {"channel": "orders", "instType": "SWAP"},
     ]
+    if include_fills_channel:
+        channels.extend({"channel": "fills", "instId": symbol} for symbol in symbols)
+    return channels

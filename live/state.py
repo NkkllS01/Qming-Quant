@@ -65,7 +65,7 @@ class LiveStateStore:
 
     def upsert_fill(self, fill: Fill) -> None:
         existing = self.fills.get(fill.fill_id)
-        if existing is not None:
+        if existing is not None and _should_preserve_existing_fill_lineage(existing, fill):
             fill = fill.model_copy(
                 update={
                     "account_id": existing.account_id,
@@ -76,6 +76,22 @@ class LiveStateStore:
             )
         self.fills[fill.fill_id] = fill
         self.last_event_at = fill.created_at
+
+    def find_order(self, *, order_id: str | None, client_order_id: str | None) -> Order | None:
+        if order_id:
+            existing = self.orders.get(order_id)
+            if existing is not None:
+                return existing
+        if client_order_id:
+            return next(
+                (
+                    current
+                    for current in self.orders.values()
+                    if current.client_order_id == client_order_id
+                ),
+                None,
+            )
+        return None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -88,19 +104,7 @@ class LiveStateStore:
         }
 
     def _find_existing_order(self, order: Order) -> Order | None:
-        existing = self.orders.get(order.order_id)
-        if existing is not None:
-            return existing
-        return next(
-            (
-                current
-                for current in self.orders.values()
-                if current.client_order_id
-                and order.client_order_id
-                and current.client_order_id == order.client_order_id
-            ),
-            None,
-        )
+        return self.find_order(order_id=order.order_id, client_order_id=order.client_order_id)
 
 
 class OKXLiveStateHandler:
@@ -132,6 +136,8 @@ class OKXLiveStateHandler:
             self._handle_positions(data)
         elif channel == "orders":
             self._handle_orders(data)
+        elif channel == "fills":
+            self._handle_fills(data)
 
     def _handle_tickers(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
@@ -224,6 +230,19 @@ class OKXLiveStateHandler:
             if fill is not None:
                 self.store.upsert_fill(fill)
 
+    def _handle_fills(self, rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            fill = _fill_from_fills_row(
+                row,
+                store=self.store,
+                account_id=self.account_id,
+                bot_id=self.bot_id,
+                strategy_id=self.strategy_id,
+                run_id=self.run_id,
+            )
+            if fill is not None:
+                self.store.upsert_fill(fill)
+
 
 def _timestamp_from_row(row: dict[str, Any], key: str = "uTime") -> datetime:
     value = row.get(key) or row.get("ts") or row.get("pTime")
@@ -266,7 +285,7 @@ def _fill_from_order_row(
         symbol=symbol,
         run_id=run_id,
         fill_id=_fill_id(row, order_id=order_id, created_at=created_at, fill_size=fill_size),
-        client_order_id=row.get("clOrdId") or order_id,
+        client_order_id=_client_order_id(row, order_id),
         side=row.get("side") or "unknown",
         size=fill_size,
         price=fill_price,
@@ -275,12 +294,74 @@ def _fill_from_order_row(
     )
 
 
+def _fill_from_fills_row(
+    row: dict[str, Any],
+    *,
+    store: LiveStateStore,
+    account_id: str,
+    bot_id: str,
+    strategy_id: str,
+    run_id: str,
+) -> Fill | None:
+    symbol = row.get("instId")
+    order_id = row.get("ordId")
+    fill_size = _decimal_or_zero(row.get("fillSz"))
+    fill_price = _decimal_or_zero(row.get("fillPx"))
+    if not symbol or not order_id or fill_size == Decimal("0") or fill_price == Decimal("0"):
+        return None
+
+    client_order_id = _client_order_id(row, order_id)
+    order = store.find_order(order_id=order_id, client_order_id=client_order_id)
+    if order is not None:
+        account_id = order.account_id
+        bot_id = order.bot_id
+        strategy_id = order.strategy_id
+        run_id = order.run_id
+
+    created_at = _timestamp_from_row(row, "ts")
+    return Fill(
+        account_id=account_id,
+        bot_id=bot_id,
+        strategy_id=strategy_id,
+        symbol=symbol,
+        run_id=run_id,
+        fill_id=_fill_id(row, order_id=order_id, created_at=created_at, fill_size=fill_size),
+        client_order_id=client_order_id,
+        side=row.get("side") or "unknown",
+        size=fill_size,
+        price=fill_price,
+        fee=_decimal_or_zero(row.get("fee")),
+        created_at=created_at,
+    )
+
+
+def _client_order_id(row: dict[str, Any], order_id: str) -> str:
+    client_order_id = row.get("clOrdId")
+    if client_order_id in {None, "", "0"}:
+        return order_id
+    return str(client_order_id)
+
+
 def _fill_id(row: dict[str, Any], *, order_id: str, created_at: datetime, fill_size: Decimal) -> str:
     trade_id = row.get("tradeId")
     if trade_id not in {None, ""}:
         return str(trade_id)
     timestamp_ms = int(created_at.timestamp() * 1000)
     return f"{order_id}:{timestamp_ms}:{fill_size}"
+
+
+def _should_preserve_existing_fill_lineage(existing: Fill, incoming: Fill) -> bool:
+    existing_is_exchange_sync = (
+        existing.bot_id == "live_sync"
+        and existing.strategy_id == "exchange_sync"
+        and existing.run_id == "live"
+    )
+    incoming_is_exchange_sync = (
+        incoming.bot_id == "live_sync"
+        and incoming.strategy_id == "exchange_sync"
+        and incoming.run_id == "live"
+    )
+    return not existing_is_exchange_sync or incoming_is_exchange_sync
 
 
 def _position_direction(row: dict[str, Any]) -> str:
