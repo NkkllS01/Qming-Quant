@@ -54,6 +54,12 @@ Phase 2 local strategy-loop smoke test:
 python scripts/phase2_basic_strategy_loop_check.py
 ```
 
+Local data quality smoke test:
+
+```powershell
+python scripts/data_quality_check.py
+```
+
 Phase 3 local risk-controls smoke test:
 
 ```powershell
