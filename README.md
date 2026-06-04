@@ -37,6 +37,25 @@ Do not expose live trading until data sync, backtesting, simulation, risk checks
 
 Use Python 3.11+.
 
+Use `.env.example` as the safe server environment template:
+
+```powershell
+Get-Content .env.example
+python scripts/config_check.py
+```
+
+The application reads process environment variables, so load the values with your shell,
+server panel, or process manager before running private OKX commands.
+
+For OKX demo/private commands, set `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE`,
+then run:
+
+```powershell
+python scripts/config_check.py --require-okx-credentials
+```
+
+Never commit `.env`; only `.env.example` belongs in git.
+
 ```powershell
 python -m pytest -q
 python -m ruff check .
