@@ -13,6 +13,7 @@ class Settings(BaseModel):
     okx_base_url: str = "https://www.okx.com"
     okx_simulated_trading: bool = False
     database_url: str = "sqlite:///trade.db"
+    run_log_path: str | None = "logs/qiming-events.jsonl"
     default_symbols: list[str] = Field(default_factory=lambda: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"])
     max_risk_per_trade: Decimal = Decimal("0.005")
     max_daily_loss: Decimal = Decimal("0.03")
@@ -30,6 +31,7 @@ class Settings(BaseModel):
             okx_base_url=os.getenv("OKX_BASE_URL", "https://www.okx.com"),
             okx_simulated_trading=_env_bool("OKX_SIMULATED_TRADING", False),
             database_url=os.getenv("DATABASE_URL", "sqlite:///trade.db"),
+            run_log_path=_env_optional_string("RUN_LOG_PATH", "logs/qiming-events.jsonl"),
             default_symbols=_env_symbols("DEFAULT_SYMBOLS", ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]),
             max_risk_per_trade=_env_decimal("MAX_RISK_PER_TRADE", Decimal("0.005")),
             max_daily_loss=_env_decimal("MAX_DAILY_LOSS", Decimal("0.03")),
@@ -48,6 +50,14 @@ def _env_symbols(name: str, default: list[str]) -> list[str]:
     if not symbols:
         raise ValueError(f"{name} must contain at least one symbol")
     return symbols
+
+
+def _env_optional_string(name: str, default: str | None) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    stripped = value.strip()
+    return stripped or None
 
 
 def _env_decimal(name: str, default: Decimal) -> Decimal:

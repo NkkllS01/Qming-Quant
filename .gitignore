@@ -6,3 +6,5 @@ pytest-cache-files-*/
 trade.db
 *.db
 .env
+logs/
+test-runtime-events.jsonl

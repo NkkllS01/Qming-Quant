@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from app.config import Settings
+from app.run_log import RuntimeEventLogger
 from backtest.engine import BacktestEngine
 from core.models import Candle, Instrument, OrderIntent
 from exchanges.okx.gateway import OKXGateway
@@ -50,6 +51,7 @@ class AppServices:
     websocket_connector: object | None = None
     live_state_repository: LiveStateRepository | None = None
     safety_repository: SafetyRepository | None = None
+    runtime_logger: RuntimeEventLogger | None = None
     max_daily_loss: Decimal = Decimal("0.03")
     max_total_drawdown_pause: Decimal = Decimal("0.08")
     default_symbols: list[str] | None = None
@@ -254,6 +256,11 @@ def build_services(settings: Settings | None = None) -> AppServices:
         websocket_connector=WebsocketsConnector(),
         live_state_repository=LiveStateRepository(settings.database_url),
         safety_repository=SafetyRepository(settings.database_url),
+        runtime_logger=(
+            RuntimeEventLogger(Path(settings.run_log_path))
+            if settings.run_log_path is not None
+            else None
+        ),
         max_daily_loss=settings.max_daily_loss,
         max_total_drawdown_pause=settings.max_total_drawdown_pause,
         max_risk_per_trade=settings.max_risk_per_trade,
@@ -452,6 +459,17 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             min_candles=args.min_candles,
         )
         if gate.status == "blocked":
+            _record_runtime_event(
+                services,
+                command=args.command,
+                outcome="blocked",
+                details={
+                    "symbol": args.symbol,
+                    "timeframe": args.timeframe,
+                    "reason": gate.reason,
+                    "candle_count": gate.candle_count,
+                },
+            )
             return f"{output_prefix} {gate.to_cli()}"
         strategy = _build_cli_strategy(
             args.strategy,
@@ -482,7 +500,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
                 journal=result.journal,
             )
             persisted = True
-        return (
+        output = (
             f"{output_prefix} symbol={args.symbol} timeframe={args.timeframe} strategy={args.strategy} "
             f"start={args.start or 'all'} end={args.end or 'all'} "
             f"tick_size={instrument.tick_size} lot_size={instrument.lot_size} "
@@ -494,6 +512,24 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"positions={result.positions_count} final_equity={result.final_equity} "
             f"persisted={str(persisted).lower()}"
         )
+        _record_runtime_event(
+            services,
+            command=args.command,
+            outcome="completed",
+            details={
+                "symbol": args.symbol,
+                "timeframe": args.timeframe,
+                "strategy": args.strategy,
+                "signals": result.signals_count,
+                "approved": result.approved_count,
+                "rejected": result.rejected_count,
+                "fills": result.fills_count,
+                "positions": result.positions_count,
+                "final_equity": result.final_equity,
+                "persisted": persisted,
+            },
+        )
+        return output
     if args.command == "live-sync":
         if args.public_only and args.private_only:
             raise ValueError("public-only and private-only cannot be used together")
@@ -520,7 +556,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             mode = "public"
         elif args.private_only:
             mode = "private"
-        return (
+        output = (
             f"live_sync mode={mode} symbols={','.join(symbols)} "
             f"public_messages={result.public_messages} "
             f"private_messages={result.private_messages} "
@@ -532,6 +568,20 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"persisted={str(result.persisted).lower()} "
             f"trading_enabled={str(result.trading_enabled).lower()}"
         )
+        _record_runtime_event(
+            services,
+            command=args.command,
+            outcome="completed",
+            details={
+                "mode": mode,
+                "symbols": symbols,
+                "public_messages": result.public_messages,
+                "private_messages": result.private_messages,
+                "persisted": result.persisted,
+                "trading_enabled": result.trading_enabled,
+            },
+        )
+        return output
     if args.command == "live-reconcile":
         if services.live_state_repository is None:
             raise RuntimeError("Live state repository is not configured")
@@ -541,13 +591,26 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             account_id=args.account_id,
         )
         result = service.run()
-        return (
+        output = (
             f"live_reconcile status={result.status} "
             f"position_issues={len(result.positions_issues)} "
             f"missing_orders_on_exchange={len(result.missing_orders_on_exchange)} "
             f"missing_orders_locally={len(result.missing_orders_locally)} "
             f"trading_allowed={str(result.is_clean).lower()}"
         )
+        _record_runtime_event(
+            services,
+            command=args.command,
+            outcome=result.status,
+            details={
+                "account_id": args.account_id,
+                "position_issues": len(result.positions_issues),
+                "missing_orders_on_exchange": len(result.missing_orders_on_exchange),
+                "missing_orders_locally": len(result.missing_orders_locally),
+                "trading_allowed": result.is_clean,
+            },
+        )
+        return output
     if args.command == "emergency-pause":
         if services.safety_repository is None:
             raise RuntimeError("Safety repository is not configured")
@@ -556,10 +619,17 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             paused=True,
             reason=args.reason,
         )
-        return (
+        output = (
             f"emergency_pause account_id={state.account_id} paused={str(state.paused).lower()} "
             f"reason={state.reason} trading_allowed=false"
         )
+        _record_runtime_event(
+            services,
+            command=args.command,
+            outcome="paused",
+            details={"account_id": state.account_id, "reason": state.reason},
+        )
+        return output
     if args.command == "emergency-resume":
         if services.safety_repository is None:
             raise RuntimeError("Safety repository is not configured")
@@ -568,10 +638,17 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             paused=False,
             reason=args.reason,
         )
-        return (
+        output = (
             f"emergency_resume account_id={state.account_id} paused={str(state.paused).lower()} "
             f"reason={state.reason}"
         )
+        _record_runtime_event(
+            services,
+            command=args.command,
+            outcome="resumed",
+            details={"account_id": state.account_id, "reason": state.reason},
+        )
+        return output
     if args.command == "trading-gate":
         if services.live_state_repository is None:
             raise RuntimeError("Live state repository is not configured")
@@ -607,7 +684,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         missing_orders_locally = (
             len(result.reconciliation.missing_orders_locally) if result.reconciliation is not None else 0
         )
-        return (
+        output = (
             f"trading_gate status={result.status} reason={result.reason} "
             f"manual_paused={str(result.pause_state.paused).lower()} "
             f"equity_risk={result.equity_risk.reason if result.equity_risk is not None else 'not_checked'} "
@@ -617,6 +694,21 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"missing_orders_locally={missing_orders_locally} "
             f"trading_allowed={str(result.trading_allowed).lower()}"
         )
+        _record_runtime_event(
+            services,
+            command=args.command,
+            outcome=result.status,
+            details={
+                "account_id": args.account_id,
+                "reason": result.reason,
+                "manual_paused": result.pause_state.paused,
+                "position_issues": position_issues,
+                "missing_orders_on_exchange": missing_orders_on_exchange,
+                "missing_orders_locally": missing_orders_locally,
+                "trading_allowed": result.trading_allowed,
+            },
+        )
+        return output
     if args.command == "live-order-check":
         if services.live_state_repository is None:
             raise RuntimeError("Live state repository is not configured")
@@ -667,13 +759,35 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             if result.trading_gate is not None and result.trading_gate.market_data is not None
             else "not_checked"
         )
-        return (
+        output = (
             f"live_order_check status={result.status} reason={result.reason} "
             f"policy={result.policy.reason} gate={gate_reason} market_data={market_data_reason} "
             f"symbol={intent.symbol} side={intent.side} action={intent.position_action} "
             f"order_type={intent.order_type} size={intent.size} reduce_only={str(intent.reduce_only).lower()} "
             f"trading_allowed={str(result.allowed).lower()}"
         )
+        _record_runtime_event(
+            services,
+            command=args.command,
+            outcome=result.status,
+            details={
+                "account_id": args.account_id,
+                "bot_id": args.bot_id,
+                "strategy_id": args.strategy_id,
+                "symbol": intent.symbol,
+                "side": intent.side,
+                "position_action": intent.position_action,
+                "order_type": intent.order_type,
+                "size": intent.size,
+                "reduce_only": intent.reduce_only,
+                "reason": result.reason,
+                "policy": result.policy.reason,
+                "gate": gate_reason,
+                "market_data": market_data_reason,
+                "trading_allowed": result.allowed,
+            },
+        )
+        return output
     raise ValueError(f"Unsupported command: {args.command}")
 
 
@@ -721,6 +835,18 @@ def _build_market_data_guard(services: AppServices, *, symbols: list[str]) -> Li
         symbols=symbols,
         max_mark_price_age_seconds=services.max_mark_price_age_seconds,
     )
+
+
+def _record_runtime_event(
+    services: AppServices,
+    *,
+    command: str,
+    outcome: str,
+    details: dict,
+) -> None:
+    if services.runtime_logger is None:
+        return
+    services.runtime_logger.record(command=command, outcome=outcome, details=details)
 
 
 def _write_backtest_report(

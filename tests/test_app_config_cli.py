@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.main import AppServices, build_parser, build_services, run_command
+from app.run_log import RuntimeEventLogger
 from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice, Order
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
 from live.state import AccountBalance
@@ -32,6 +33,7 @@ def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("OKX_BASE_URL", "https://www.okx.com")
     monkeypatch.setenv("OKX_SIMULATED_TRADING", "1")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///trade.db")
+    monkeypatch.setenv("RUN_LOG_PATH", "logs/test-events.jsonl")
     monkeypatch.setenv("DEFAULT_SYMBOLS", "BTC-USDT-SWAP,ETH-USDT-SWAP,SOL-USDT-SWAP")
     monkeypatch.setenv("MAX_RISK_PER_TRADE", "0.004")
     monkeypatch.setenv("MAX_DAILY_LOSS", "0.02")
@@ -48,6 +50,7 @@ def test_settings_reads_okx_credentials_from_environment(monkeypatch) -> None:
     assert settings.okx_base_url == "https://www.okx.com"
     assert settings.okx_simulated_trading is True
     assert settings.database_url == "sqlite:///trade.db"
+    assert settings.run_log_path == "logs/test-events.jsonl"
     assert settings.default_symbols == ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"]
     assert settings.max_risk_per_trade == Decimal("0.004")
     assert settings.max_daily_loss == Decimal("0.02")
@@ -93,6 +96,15 @@ def test_build_services_passes_okx_rest_demo_settings() -> None:
 
     assert services.gateway.rest.base_url == "https://example.test"
     assert services.gateway.rest.simulated_trading is True
+    assert services.runtime_logger is not None
+
+
+def test_settings_allows_disabling_runtime_log_path(monkeypatch) -> None:
+    monkeypatch.setenv("RUN_LOG_PATH", "")
+
+    settings = Settings.from_env()
+
+    assert settings.run_log_path is None
 
 
 def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
@@ -1528,6 +1540,31 @@ def test_run_emergency_pause_and_resume_commands_persist_manual_state() -> None:
     assert "trading_allowed=false" in pause_output
     assert "emergency_resume account_id=okx_sub_main paused=false" in resume_output
     assert safety_repo.get_pause(account_id="okx_sub_main").paused is False
+
+
+def test_run_emergency_pause_records_runtime_event() -> None:
+    log_path = Path("test-runtime-events.jsonl")
+    services = AppServices(
+        gateway=FakeGateway(),
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        safety_repository=SafetyRepository("sqlite:///:memory:"),
+        runtime_logger=RuntimeEventLogger(log_path),
+    )
+
+    run_command(
+        build_parser().parse_args(["emergency-pause", "--reason", "operator_stop"]),
+        services,
+    )
+
+    event = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["system"] == "Qiming Quant"
+    assert event["component"] == "cli"
+    assert event["command"] == "emergency-pause"
+    assert event["outcome"] == "paused"
+    assert event["details"] == {
+        "account_id": "okx_sub_main",
+        "reason": "operator_stop",
+    }
 
 
 def test_run_trading_gate_command_allows_clean_state() -> None:
