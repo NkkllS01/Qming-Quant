@@ -42,6 +42,12 @@ python -m pytest -q
 python -m ruff check .
 ```
 
+Local acceptance smoke test:
+
+```powershell
+python scripts/local_acceptance_check.py
+```
+
 Phase 1 acceptance smoke test:
 
 ```powershell
