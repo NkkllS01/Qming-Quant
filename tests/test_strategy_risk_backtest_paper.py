@@ -4,9 +4,10 @@ from decimal import Decimal
 from backtest.engine import BacktestEngine
 from core.models import Candle, OrderIntent, Signal
 from execution.order_factory import OrderFactory
-from paper.broker import PaperBroker
 from risk.manager import PortfolioRiskManager
 from risk.symbol_lease import SymbolLeaseManager
+from simulation.broker import SimulationBroker
+from paper.broker import PaperBroker
 from strategies.examples.trend import MultiTimeframeTrendStrategy
 from strategies.runner import StrategyRunner
 
@@ -224,8 +225,8 @@ def test_order_factory_rejects_size_below_min_size_after_quantization() -> None:
         raise AssertionError("expected minimum order size rejection")
 
 
-def test_paper_broker_fills_market_order_and_updates_position() -> None:
-    broker = PaperBroker(initial_equity=Decimal("1000"))
+def test_simulation_broker_fills_market_order_and_updates_position() -> None:
+    broker = SimulationBroker(initial_equity=Decimal("1000"))
     intent = OrderIntent(
         account_id="okx_sub_main",
         bot_id="okx_perp_bot_main",
@@ -245,6 +246,28 @@ def test_paper_broker_fills_market_order_and_updates_position() -> None:
 
     assert fill.price == Decimal("100")
     assert broker.positions["BTC-USDT-SWAP"].size == Decimal("0.1")
+
+
+def test_paper_broker_keeps_legacy_fill_id_prefix() -> None:
+    broker = PaperBroker(initial_equity=Decimal("1000"))
+    intent = OrderIntent(
+        account_id="okx_sub_main",
+        bot_id="okx_perp_bot_main",
+        strategy_id="btc_trend_15m",
+        symbol="BTC-USDT-SWAP",
+        run_id="run-1",
+        side="buy",
+        position_action="open",
+        order_type="market",
+        size=Decimal("0.1"),
+        price=None,
+        reduce_only=False,
+        client_order_id="test-1",
+    )
+
+    fill = broker.execute(intent, market_price=Decimal("100"))
+
+    assert fill.fill_id == "paper-1"
 
 
 def test_backtest_engine_generates_metrics_from_strategy() -> None:

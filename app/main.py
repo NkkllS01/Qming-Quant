@@ -22,7 +22,7 @@ from live.sync import LiveSyncService
 from live.trading_gate import TradingGateService
 from market_data.candle_sync import CandleSyncService
 from market_data.candles import find_missing_ranges
-from paper.engine import PaperTradingEngine
+from simulation.engine import SimulationTradingEngine
 from storage.live_repository import LiveStateRepository
 from storage.repositories import (
     CandleRepository,
@@ -460,7 +460,7 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             run_id=run_id,
         )
         instrument = _instrument_or_default(services, args.symbol)
-        result = PaperTradingEngine(
+        result = SimulationTradingEngine(
             initial_equity=Decimal("1000"),
             max_risk_per_trade=services.max_risk_per_trade,
             max_daily_loss=services.max_daily_loss,
@@ -471,10 +471,11 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             tick_size=instrument.tick_size,
             lot_size=instrument.lot_size,
             min_size=instrument.min_size,
+            fill_id_prefix="sim" if args.command == "sim-run" else "paper",
         ).run(strategy, candles)
         persisted = False
         if services.trade_repository is not None:
-            services.trade_repository.save_paper_run(
+            services.trade_repository.save_simulation_run(
                 run_id=run_id,
                 fills=result.fills,
                 positions=result.positions,

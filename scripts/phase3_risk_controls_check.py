@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.models import Candle
-from paper.engine import PaperTradingEngine
+from simulation.engine import SimulationTradingEngine
 from strategies.examples.ma_crossover import MovingAverageCrossoverStrategy
 
 
@@ -30,7 +30,7 @@ def _run_check() -> None:
 
 def _check_position_size_cap() -> None:
     strategy = _strategy("risk-size-cap")
-    result = PaperTradingEngine(initial_equity=Decimal("1000"), default_size=Decimal("100")).run(
+    result = SimulationTradingEngine(initial_equity=Decimal("1000"), default_size=Decimal("100")).run(
         strategy,
         _ma_crossover_candles("BTC-USDT-SWAP"),
     )
@@ -42,7 +42,7 @@ def _check_position_size_cap() -> None:
 
 def _check_open_position_limit_rejects_signal() -> None:
     strategy = _strategy("risk-open-limit")
-    result = PaperTradingEngine(
+    result = SimulationTradingEngine(
         initial_equity=Decimal("1000"),
         default_size=Decimal("1"),
         max_open_positions=0,
@@ -54,7 +54,7 @@ def _check_open_position_limit_rejects_signal() -> None:
 
 
 def _check_daily_loss_limit() -> None:
-    result = PaperTradingEngine(
+    result = SimulationTradingEngine(
         initial_equity=Decimal("1000"),
         current_daily_loss=Decimal("30"),
     ).run(_strategy("risk-daily-loss"), _ma_crossover_candles("BTC-USDT-SWAP"))
@@ -62,7 +62,7 @@ def _check_daily_loss_limit() -> None:
 
 
 def _check_drawdown_pause() -> None:
-    result = PaperTradingEngine(
+    result = SimulationTradingEngine(
         initial_equity=Decimal("1000"),
         current_drawdown=Decimal("0.08"),
     ).run(_strategy("risk-drawdown"), _ma_crossover_candles("BTC-USDT-SWAP"))

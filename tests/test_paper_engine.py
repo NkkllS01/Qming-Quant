@@ -4,6 +4,7 @@ from decimal import Decimal
 from core.models import Candle
 from core.models import Signal
 from paper.engine import PaperTradingEngine
+from simulation.engine import SimulationTradingEngine
 from strategies.examples.trend import MultiTimeframeTrendStrategy
 
 
@@ -31,7 +32,7 @@ def test_paper_trading_engine_runs_strategy_through_risk_and_broker() -> None:
         symbol="BTC-USDT-SWAP",
         run_id="paper-run-1",
     )
-    engine = PaperTradingEngine(initial_equity=Decimal("1000"))
+    engine = SimulationTradingEngine(initial_equity=Decimal("1000"))
 
     result = engine.run(strategy, candles)
 
@@ -55,7 +56,7 @@ def test_paper_trading_engine_records_risk_rejection() -> None:
         symbol="BTC-USDT-SWAP",
         run_id="paper-run-1",
     )
-    engine = PaperTradingEngine(initial_equity=Decimal("1000"), max_open_positions=0)
+    engine = SimulationTradingEngine(initial_equity=Decimal("1000"), max_open_positions=0)
 
     result = engine.run(strategy, candles)
 
@@ -70,7 +71,7 @@ def test_paper_trading_engine_records_risk_rejection() -> None:
 def test_paper_trading_engine_rejects_when_daily_loss_limit_is_reached() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [_candle(start + timedelta(minutes=15 * i), Decimal(100 + i)) for i in range(2)]
-    engine = PaperTradingEngine(
+    engine = SimulationTradingEngine(
         initial_equity=Decimal("1000"),
         current_daily_loss=Decimal("30"),
     )
@@ -86,7 +87,7 @@ def test_paper_trading_engine_rejects_when_daily_loss_limit_is_reached() -> None
 def test_paper_trading_engine_rejects_when_drawdown_pause_is_reached() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [_candle(start + timedelta(minutes=15 * i), Decimal(100 + i)) for i in range(2)]
-    engine = PaperTradingEngine(
+    engine = SimulationTradingEngine(
         initial_equity=Decimal("1000"),
         current_drawdown=Decimal("0.08"),
     )
@@ -148,7 +149,7 @@ def test_paper_trading_engine_fills_signal_on_next_candle_open() -> None:
             confirmed=True,
         ),
     ]
-    engine = PaperTradingEngine(initial_equity=Decimal("1000"))
+    engine = SimulationTradingEngine(initial_equity=Decimal("1000"))
 
     result = engine.run(OneShotLongStrategy(), candles)
 
@@ -184,7 +185,7 @@ def test_paper_trading_engine_closes_position_when_take_profit_is_hit() -> None:
             confirmed=True,
         ),
     ]
-    engine = PaperTradingEngine(initial_equity=Decimal("1000"), default_size=Decimal("1"))
+    engine = SimulationTradingEngine(initial_equity=Decimal("1000"), default_size=Decimal("1"))
 
     result = engine.run(OneShotLongStrategy(), candles)
 
@@ -223,7 +224,7 @@ def test_paper_trading_engine_closes_position_at_stop_loss_before_take_profit() 
             confirmed=True,
         ),
     ]
-    engine = PaperTradingEngine(initial_equity=Decimal("1000"), default_size=Decimal("1"))
+    engine = SimulationTradingEngine(initial_equity=Decimal("1000"), default_size=Decimal("1"))
 
     result = engine.run(OneShotLongStrategy(), candles)
 
@@ -232,3 +233,19 @@ def test_paper_trading_engine_closes_position_at_stop_loss_before_take_profit() 
     assert result.positions_count == 0
     assert result.final_equity == Decimal("999.00")
     assert result.journal[-1].event_type == "exit_stop_loss"
+
+
+def test_paper_trading_engine_keeps_legacy_fill_id_prefix() -> None:
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    candles = [
+        _candle(start, Decimal("100")),
+        _candle(start + timedelta(minutes=15), Decimal("101")),
+    ]
+
+    result = PaperTradingEngine(initial_equity=Decimal("1000")).run(
+        OneShotLongStrategy(),
+        candles,
+    )
+
+    assert isinstance(PaperTradingEngine(initial_equity=Decimal("1000")), SimulationTradingEngine)
+    assert result.fills[0].fill_id == "paper-1"

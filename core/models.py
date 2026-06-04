@@ -221,7 +221,7 @@ class BacktestResult(BaseModel):
     equity_curve: list[EquityPoint] = []
 
 
-class PaperJournalEvent(BaseModel):
+class SimulationJournalEvent(BaseModel):
     event_type: str
     symbol: str
     strategy_id: str
@@ -229,7 +229,7 @@ class PaperJournalEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-class PaperRunResult(BaseModel):
+class SimulationRunResult(BaseModel):
     initial_equity: Decimal
     final_equity: Decimal
     signals_count: int
@@ -237,6 +237,10 @@ class PaperRunResult(BaseModel):
     rejected_count: int
     fills_count: int
     positions_count: int
-    journal: list[PaperJournalEvent]
+    journal: list[SimulationJournalEvent]
     fills: list[Fill] = []
     positions: list[Position] = []
+
+
+PaperJournalEvent = SimulationJournalEvent
+PaperRunResult = SimulationRunResult

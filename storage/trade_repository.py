@@ -7,7 +7,7 @@ from sqlalchemy import Column, DateTime, MetaData, Numeric, String, Table, creat
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 
-from core.models import Fill, PaperJournalEvent, Position
+from core.models import Fill, Position, SimulationJournalEvent
 
 
 class TradeRepository:
@@ -45,6 +45,7 @@ class TradeRepository:
             Column("leverage", String, nullable=False),
             Column("updated_at", DateTime(timezone=True), nullable=False),
         )
+        # Kept for backward compatibility with existing local SQLite databases.
         self.journal = Table(
             "paper_journal",
             self.metadata,
@@ -58,18 +59,33 @@ class TradeRepository:
         )
         self.metadata.create_all(self.engine)
 
+    def save_simulation_run(
+        self,
+        *,
+        run_id: str,
+        fills: list[Fill],
+        positions: list[Position],
+        journal: list[SimulationJournalEvent],
+    ) -> None:
+        self._delete_run_snapshot(run_id)
+        self._upsert_fills(fills)
+        self._upsert_positions(run_id, positions)
+        self._upsert_journal(run_id, journal)
+
     def save_paper_run(
         self,
         *,
         run_id: str,
         fills: list[Fill],
         positions: list[Position],
-        journal: list[PaperJournalEvent],
+        journal: list[SimulationJournalEvent],
     ) -> None:
-        self._delete_run_snapshot(run_id)
-        self._upsert_fills(fills)
-        self._upsert_positions(run_id, positions)
-        self._upsert_journal(run_id, journal)
+        self.save_simulation_run(
+            run_id=run_id,
+            fills=fills,
+            positions=positions,
+            journal=journal,
+        )
 
     def _delete_run_snapshot(self, run_id: str) -> None:
         with self.engine.begin() as conn:
@@ -152,7 +168,7 @@ class TradeRepository:
         with self.engine.begin() as conn:
             conn.execute(stmt)
 
-    def _upsert_journal(self, run_id: str, journal: list[PaperJournalEvent]) -> None:
+    def _upsert_journal(self, run_id: str, journal: list[SimulationJournalEvent]) -> None:
         if not journal:
             return
         rows = [
@@ -223,12 +239,12 @@ class TradeRepository:
             for row in rows
         ]
 
-    def list_journal(self, run_id: str) -> list[PaperJournalEvent]:
+    def list_journal(self, run_id: str) -> list[SimulationJournalEvent]:
         stmt = select(self.journal).where(self.journal.c.run_id == run_id).order_by(self.journal.c.event_index)
         with self.engine.begin() as conn:
             rows = conn.execute(stmt).mappings().all()
         return [
-            PaperJournalEvent(
+            SimulationJournalEvent(
                 event_type=row["event_type"],
                 symbol=row["symbol"],
                 strategy_id=row["strategy_id"],

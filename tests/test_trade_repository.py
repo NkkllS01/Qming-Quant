@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from core.models import Fill, PaperJournalEvent, Position
+from core.models import Fill, PaperJournalEvent, Position, SimulationJournalEvent
 from storage.trade_repository import TradeRepository
 
 
@@ -28,7 +28,7 @@ def test_trade_repository_persists_fills_positions_and_journal_by_run_id() -> No
         entry_price=Decimal("100"),
         mark_price=Decimal("101"),
     )
-    event = PaperJournalEvent(
+    event = SimulationJournalEvent(
         event_type="fill",
         symbol="BTC-USDT-SWAP",
         strategy_id="btc_trend_15m",
@@ -36,7 +36,7 @@ def test_trade_repository_persists_fills_positions_and_journal_by_run_id() -> No
         timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
     )
 
-    repo.save_paper_run(
+    repo.save_simulation_run(
         run_id="paper-run-1",
         fills=[fill],
         positions=[position],
@@ -104,3 +104,23 @@ def test_trade_repository_replaces_existing_paper_run_snapshot() -> None:
     assert repo.list_fills("paper-run-1") == []
     assert repo.list_positions("paper-run-1") == []
     assert repo.list_journal("paper-run-1") == []
+
+
+def test_trade_repository_paper_save_alias_remains_compatible() -> None:
+    repo = TradeRepository("sqlite:///:memory:")
+    event = PaperJournalEvent(
+        event_type="fill",
+        symbol="BTC-USDT-SWAP",
+        strategy_id="btc_trend_15m",
+        message="buy 0.1 @ 100",
+        timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    )
+
+    repo.save_paper_run(
+        run_id="paper-run-1",
+        fills=[],
+        positions=[],
+        journal=[event],
+    )
+
+    assert repo.list_journal("paper-run-1")[0].event_type == "fill"
