@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice, OrderIntent
-from exchanges.okx.mapper import map_funding_rate, map_index_price, map_instrument, map_mark_price, map_okx_candles
+from core.models import Candle, Fill, FundingRate, IndexPrice, Instrument, MarkPrice, OrderIntent
+from exchanges.okx.mapper import (
+    map_funding_rate,
+    map_index_price,
+    map_instrument,
+    map_mark_price,
+    map_okx_candles,
+    map_trade_fill,
+)
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient
 
@@ -121,6 +128,31 @@ class OKXGateway:
 
     def orders_pending(self, inst_type: str = "SWAP") -> dict:
         return self.rest.get("/api/v5/trade/orders-pending", {"instType": inst_type}, private=True)
+
+    def recent_fills(
+        self,
+        *,
+        account_id: str,
+        inst_type: str = "SWAP",
+        symbol: str | None = None,
+        order_id: str | None = None,
+        after: str | None = None,
+        before: str | None = None,
+        limit: int = 100,
+    ) -> list[Fill]:
+        if limit < 1 or limit > 100:
+            raise ValueError("recent_fills limit must be between 1 and 100")
+        params: dict[str, str | int] = {"instType": inst_type, "limit": limit}
+        if symbol is not None:
+            params["instId"] = symbol
+        if order_id is not None:
+            params["ordId"] = order_id
+        if after is not None:
+            params["after"] = after
+        if before is not None:
+            params["before"] = before
+        payload = self.rest.get("/api/v5/trade/fills", params, private=True)
+        return [map_trade_fill(row, account_id=account_id) for row in payload.get("data", [])]
 
     def place_order(self, intent: OrderIntent, *, td_mode: str = "isolated") -> dict:
         body = {

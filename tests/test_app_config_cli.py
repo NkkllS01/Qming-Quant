@@ -6,7 +6,7 @@ from pathlib import Path
 from app.config import Settings
 from app.main import AppServices, build_parser, build_services, run_command
 from app.run_log import RuntimeEventLogger
-from core.models import Candle, FundingRate, IndexPrice, Instrument, MarkPrice, Order
+from core.models import Candle, Fill, FundingRate, IndexPrice, Instrument, MarkPrice, Order
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig
 from live.state import AccountBalance
 from storage.live_repository import LiveStateRepository
@@ -171,6 +171,7 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     sync_funding_args = parser.parse_args(
         ["sync-funding-rates", "--symbol", "BTC-USDT-SWAP", "--limit", "2"]
     )
+    sync_fills_args = parser.parse_args(["sync-fills", "--symbol", "BTC-USDT-SWAP", "--limit", "10"])
     sync_mark_args = parser.parse_args(["sync-mark-prices", "--symbol", "BTC-USDT-SWAP"])
     sync_index_args = parser.parse_args(["sync-index-prices", "--quote-currency", "USDT"])
     live_sync_args = parser.parse_args(
@@ -227,6 +228,9 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert sync_funding_args.command == "sync-funding-rates"
     assert sync_funding_args.symbol == "BTC-USDT-SWAP"
     assert sync_funding_args.limit == 2
+    assert sync_fills_args.command == "sync-fills"
+    assert sync_fills_args.symbol == "BTC-USDT-SWAP"
+    assert sync_fills_args.limit == 10
     assert sync_mark_args.command == "sync-mark-prices"
     assert sync_mark_args.inst_type == "SWAP"
     assert sync_mark_args.symbol == "BTC-USDT-SWAP"
@@ -256,6 +260,8 @@ class FakeGateway:
         self.candle_calls: list[dict] = []
         self.rest_positions: list[dict] = []
         self.rest_orders: list[dict] = []
+        self.rest_fills: list[Fill] = []
+        self.recent_fill_calls: list[dict] = []
         self.public_ws = OKXWebSocketClient(OKXWebSocketConfig())
         self.private_ws = OKXWebSocketClient(
             OKXWebSocketConfig(api_key="key", secret_key="secret", passphrase="pass")
@@ -355,6 +361,26 @@ class FakeGateway:
 
     def orders_pending(self) -> dict:
         return {"data": self.rest_orders}
+
+    def recent_fills(
+        self,
+        *,
+        account_id: str,
+        inst_type: str = "SWAP",
+        symbol: str | None = None,
+        order_id: str | None = None,
+        limit: int = 100,
+    ) -> list[Fill]:
+        self.recent_fill_calls.append(
+            {
+                "account_id": account_id,
+                "inst_type": inst_type,
+                "symbol": symbol,
+                "order_id": order_id,
+                "limit": limit,
+            }
+        )
+        return self.rest_fills
 
 
 def test_run_instruments_command_uses_gateway() -> None:
@@ -492,6 +518,48 @@ def test_run_sync_funding_rates_command_persists_gateway_rates() -> None:
 
     assert "synced 2 funding rates" in output
     assert len(funding_repo.list_rates("BTC-USDT-SWAP")) == 2
+
+
+def test_run_sync_fills_command_persists_recent_rest_fills() -> None:
+    gateway = FakeGateway()
+    gateway.rest_fills = [
+        Fill(
+            account_id="okx_sub_main",
+            bot_id="live_sync",
+            strategy_id="exchange_sync",
+            symbol="BTC-USDT-SWAP",
+            run_id="live",
+            fill_id="trade-1",
+            client_order_id="client-1",
+            side="buy",
+            size=Decimal("0.03"),
+            price=Decimal("70200"),
+            fee=Decimal("-0.08"),
+            created_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
+        )
+    ]
+    live_repo = LiveStateRepository("sqlite:///:memory:")
+    services = AppServices(
+        gateway=gateway,
+        candle_repository=CandleRepository("sqlite:///:memory:"),
+        live_state_repository=live_repo,
+    )
+    args = build_parser().parse_args(["sync-fills", "--symbol", "BTC-USDT-SWAP", "--limit", "10"])
+
+    output = run_command(args, services)
+
+    assert output == "sync_fills scope=BTC-USDT-SWAP fetched=1 stored=1 matched_orders=0"
+    assert gateway.recent_fill_calls == [
+        {
+            "account_id": "okx_sub_main",
+            "inst_type": "SWAP",
+            "symbol": "BTC-USDT-SWAP",
+            "order_id": None,
+            "limit": 10,
+        }
+    ]
+    restored = live_repo.load_snapshot(account_id="okx_sub_main")
+    assert restored.fills["trade-1"].price == Decimal("70200")
 
 
 def test_run_sync_mark_prices_command_persists_gateway_prices() -> None:

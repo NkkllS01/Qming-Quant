@@ -16,6 +16,7 @@ from exchanges.okx.gateway import OKXGateway
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.websocket import OKXWebSocketClient, OKXWebSocketConfig, WebsocketsConnector
 from live.execution import LiveOrderExecutionService
+from live.fill_sync import LiveFillSyncService
 from live.market_data_guard import LiveMarketDataGuard
 from live.reconcile import LiveReconciliationService
 from live.risk import LiveEquityRiskGuard
@@ -126,6 +127,13 @@ def build_parser() -> argparse.ArgumentParser:
     sync_funding.add_argument("--before", default=None)
     sync_funding.add_argument("--after", default=None)
     sync_funding.add_argument("--limit", type=int, default=100)
+
+    sync_fills = subparsers.add_parser("sync-fills", help="Sync recent OKX private fills into local live state")
+    sync_fills.add_argument("--account-id", default="okx_sub_main")
+    sync_fills.add_argument("--inst-type", default="SWAP")
+    sync_fills.add_argument("--symbol", default=None)
+    sync_fills.add_argument("--order-id", default=None)
+    sync_fills.add_argument("--limit", type=int, default=100)
 
     sync_mark = subparsers.add_parser("sync-mark-prices", help="Sync OKX mark price snapshots locally")
     sync_mark.add_argument("--inst-type", default="SWAP")
@@ -343,6 +351,38 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         if services.funding_rate_repository is not None:
             services.funding_rate_repository.upsert_many(rates)
         return f"synced {len(rates)} funding rates for {args.symbol}"
+    if args.command == "sync-fills":
+        if services.live_state_repository is None:
+            raise RuntimeError("Live state repository is not configured")
+        service = LiveFillSyncService(
+            gateway=services.gateway,
+            repository=services.live_state_repository,
+            account_id=args.account_id,
+        )
+        result = service.run(
+            inst_type=args.inst_type,
+            symbol=args.symbol,
+            order_id=args.order_id,
+            limit=args.limit,
+        )
+        scope = args.symbol or args.order_id or args.inst_type
+        output = (
+            f"sync_fills scope={scope} fetched={result.fetched_count} "
+            f"stored={result.stored_count} matched_orders={result.matched_count}"
+        )
+        _record_runtime_event(
+            services,
+            command=args.command,
+            outcome="completed",
+            details={
+                "account_id": args.account_id,
+                "scope": scope,
+                "fetched": result.fetched_count,
+                "stored": result.stored_count,
+                "matched_orders": result.matched_count,
+            },
+        )
+        return output
     if args.command == "sync-mark-prices":
         prices = services.gateway.mark_prices(args.inst_type, symbol=args.symbol)
         if services.mark_price_repository is not None:

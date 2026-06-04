@@ -9,7 +9,14 @@ import httpx
 
 from core.models import OrderIntent
 from exchanges.okx.gateway import OKXGateway
-from exchanges.okx.mapper import map_funding_rate, map_index_price, map_instrument, map_mark_price, map_okx_candles
+from exchanges.okx.mapper import (
+    map_funding_rate,
+    map_index_price,
+    map_instrument,
+    map_mark_price,
+    map_okx_candles,
+    map_trade_fill,
+)
 from exchanges.okx.rest import OKXRestClient
 from exchanges.okx.signer import sign_okx_request
 from exchanges.okx.websocket import (
@@ -122,6 +129,33 @@ def test_map_index_price_row_to_model() -> None:
     assert index_price.index_id == "BTC-USDT"
     assert index_price.index_price == Decimal("69990.12")
     assert index_price.updated_at.year == 2024
+
+
+def test_map_trade_fill_row_to_model() -> None:
+    fill = map_trade_fill(
+        {
+            "instId": "BTC-USDT-SWAP",
+            "tradeId": "trade-1",
+            "ordId": "okx-1",
+            "clOrdId": "client-1",
+            "side": "buy",
+            "fillSz": "0.03",
+            "fillPx": "70200",
+            "fee": "-0.08",
+            "ts": "1717200003000",
+        },
+        account_id="okx_sub_main",
+    )
+
+    assert fill.account_id == "okx_sub_main"
+    assert fill.bot_id == "live_sync"
+    assert fill.strategy_id == "exchange_sync"
+    assert fill.symbol == "BTC-USDT-SWAP"
+    assert fill.fill_id == "trade-1"
+    assert fill.client_order_id == "client-1"
+    assert fill.size == Decimal("0.03")
+    assert fill.price == Decimal("70200")
+    assert fill.fee == Decimal("-0.08")
 
 
 def test_okx_gateway_history_candles_range_paginates_until_start_is_covered() -> None:
@@ -367,6 +401,45 @@ def test_okx_gateway_cancels_order_by_client_order_id() -> None:
     ]
 
 
+def test_okx_gateway_reads_recent_private_fills() -> None:
+    rest = FakeFillsRest()
+    gateway = OKXGateway(rest)
+
+    fills = gateway.recent_fills(
+        account_id="okx_sub_main",
+        inst_type="SWAP",
+        symbol="BTC-USDT-SWAP",
+        order_id="okx-1",
+        limit=50,
+    )
+
+    assert fills[0].fill_id == "trade-1"
+    assert fills[0].price == Decimal("70200")
+    assert rest.gets == [
+        {
+            "path": "/api/v5/trade/fills",
+            "params": {
+                "instType": "SWAP",
+                "limit": 50,
+                "instId": "BTC-USDT-SWAP",
+                "ordId": "okx-1",
+            },
+            "private": True,
+        }
+    ]
+
+
+def test_okx_gateway_rejects_invalid_recent_fills_limit() -> None:
+    gateway = OKXGateway(FakeFillsRest())
+
+    try:
+        gateway.recent_fills(account_id="okx_sub_main", limit=101)
+    except ValueError as exc:
+        assert "between 1 and 100" in str(exc)
+    else:
+        raise AssertionError("expected recent fills limit to be bounded")
+
+
 def test_okx_websocket_runtime_subscribes_and_dispatches_public_messages() -> None:
     async def run() -> None:
         received: list[dict] = []
@@ -542,6 +615,29 @@ class FakeTradeRest:
     def post(self, path: str, body: dict, *, private: bool = False) -> dict:
         self.posts.append({"path": path, "body": body, "private": private})
         return {"data": [{"ordId": "okx-1"}]}
+
+
+class FakeFillsRest:
+    def __init__(self) -> None:
+        self.gets: list[dict] = []
+
+    def get(self, path: str, params: dict | None = None, *, private: bool = False) -> dict:
+        self.gets.append({"path": path, "params": params, "private": private})
+        return {
+            "data": [
+                {
+                    "instId": "BTC-USDT-SWAP",
+                    "tradeId": "trade-1",
+                    "ordId": "okx-1",
+                    "clOrdId": "client-1",
+                    "side": "buy",
+                    "fillSz": "0.03",
+                    "fillPx": "70200",
+                    "fee": "-0.08",
+                    "ts": "1717200003000",
+                }
+            ]
+        }
 
 
 class FakeMarketPriceRest:
