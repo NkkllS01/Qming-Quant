@@ -204,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     trading_gate = subparsers.add_parser("trading-gate", help="Evaluate live trading safety gate")
     trading_gate.add_argument("--account-id", default="okx_sub_main")
 
+    operator_status = subparsers.add_parser("operator-status", help="Show operator safety status summary")
+    operator_status.add_argument("--account-id", default="okx_sub_main")
+    operator_status.add_argument("--skip-gate", action="store_true")
+    operator_status.add_argument("--include-gate", action="store_true")
+
     live_order_check = subparsers.add_parser("live-order-check", help="Dry-run a live order intent without placing it")
     live_order_check.add_argument("--account-id", default="okx_sub_main")
     live_order_check.add_argument("--bot-id", default="okx_perp_bot_main")
@@ -659,34 +664,48 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
         if not events:
             return "run_log_tail status=empty"
         return "\n".join(json.dumps(event, ensure_ascii=False, separators=(",", ":")) for event in events)
+    if args.command == "operator-status":
+        if services.safety_repository is None:
+            raise RuntimeError("Safety repository is not configured")
+        pause_state = services.safety_repository.get_pause(account_id=args.account_id)
+        gate_result = None
+        if args.include_gate and not args.skip_gate:
+            gate_result = _evaluate_cli_trading_gate(
+                services,
+                account_id=args.account_id,
+                symbols=services.default_symbols or ["BTC-USDT-SWAP", "ETH-USDT-SWAP"],
+            )
+        latest_events = services.runtime_logger.tail(limit=1) if services.runtime_logger is not None else []
+        latest_event = latest_events[-1] if latest_events else None
+        gate_status = gate_result.status if gate_result is not None else "skipped"
+        gate_reason = gate_result.reason if gate_result is not None else "skipped"
+        trading_allowed = gate_result.trading_allowed if gate_result is not None else False
+        last_event_status = _latest_event_status(services, latest_event)
+        last_event_command = latest_event["command"] if latest_event is not None else "none"
+        last_event_outcome = latest_event["outcome"] if latest_event is not None else "none"
+        last_event_timestamp = latest_event["timestamp"] if latest_event is not None else "none"
+        return (
+            f"operator_status account_id={args.account_id} "
+            f"manual_paused={str(pause_state.paused).lower()} "
+            f"pause_reason={pause_state.reason} "
+            f"pause_updated_at={pause_state.updated_at.isoformat()} "
+            f"gate_status={gate_status} gate_reason={gate_reason} "
+            f"trading_allowed={str(trading_allowed).lower()} "
+            f"last_event={last_event_status} "
+            f"last_event_command={last_event_command} "
+            f"last_event_outcome={last_event_outcome} "
+            f"last_event_timestamp={last_event_timestamp}"
+        )
     if args.command == "trading-gate":
         if services.live_state_repository is None:
             raise RuntimeError("Live state repository is not configured")
         if services.safety_repository is None:
             raise RuntimeError("Safety repository is not configured")
-        reconciliation = LiveReconciliationService(
-            gateway=services.gateway,
-            repository=services.live_state_repository,
-            account_id=args.account_id,
-        )
-        equity_risk_guard = LiveEquityRiskGuard(
-            live_state_repository=services.live_state_repository,
-            safety_repository=services.safety_repository,
-            account_id=args.account_id,
-            max_daily_loss=services.max_daily_loss,
-            max_total_drawdown=services.max_total_drawdown_pause,
-        )
-        market_data_guard = _build_market_data_guard(
+        result = _evaluate_cli_trading_gate(
             services,
+            account_id=args.account_id,
             symbols=services.default_symbols or ["BTC-USDT-SWAP", "ETH-USDT-SWAP"],
         )
-        result = TradingGateService(
-            reconciliation=reconciliation,
-            safety_repository=services.safety_repository,
-            account_id=args.account_id,
-            equity_risk_guard=equity_risk_guard,
-            market_data_guard=market_data_guard,
-        ).evaluate()
         position_issues = len(result.reconciliation.positions_issues) if result.reconciliation is not None else 0
         missing_orders_on_exchange = (
             len(result.reconciliation.missing_orders_on_exchange) if result.reconciliation is not None else 0
@@ -845,6 +864,48 @@ def _build_market_data_guard(services: AppServices, *, symbols: list[str]) -> Li
         symbols=symbols,
         max_mark_price_age_seconds=services.max_mark_price_age_seconds,
     )
+
+
+def _evaluate_cli_trading_gate(
+    services: AppServices,
+    *,
+    account_id: str,
+    symbols: list[str],
+):
+    if services.live_state_repository is None:
+        raise RuntimeError("Live state repository is not configured")
+    if services.safety_repository is None:
+        raise RuntimeError("Safety repository is not configured")
+    reconciliation = LiveReconciliationService(
+        gateway=services.gateway,
+        repository=services.live_state_repository,
+        account_id=account_id,
+    )
+    equity_risk_guard = LiveEquityRiskGuard(
+        live_state_repository=services.live_state_repository,
+        safety_repository=services.safety_repository,
+        account_id=account_id,
+        max_daily_loss=services.max_daily_loss,
+        max_total_drawdown=services.max_total_drawdown_pause,
+    )
+    return TradingGateService(
+        reconciliation=reconciliation,
+        safety_repository=services.safety_repository,
+        account_id=account_id,
+        equity_risk_guard=equity_risk_guard,
+        market_data_guard=_build_market_data_guard(services, symbols=symbols),
+    ).evaluate()
+
+
+def _latest_event_status(
+    services: AppServices,
+    latest_event: dict | None,
+) -> str:
+    if services.runtime_logger is None:
+        return "disabled"
+    if latest_event is None:
+        return "empty"
+    return "available"
 
 
 def _record_runtime_event(
