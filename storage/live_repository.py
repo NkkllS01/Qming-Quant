@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Column, DateTime, MetaData, String, Table, create_engine, delete, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 
 from core.models import Fill, Order, Position
 from live.state import AccountBalance, LiveStateStore, LiveTicker
+from storage.db import ensure_utc, upsert_rows
 
 
 class LiveStateRepository:
@@ -89,9 +88,9 @@ class LiveStateRepository:
     def save_snapshot(self, *, account_id: str, store: LiveStateStore) -> None:
         with self.engine.begin() as conn:
             if store.tickers:
-                _upsert(conn, self.tickers, [_ticker_row(ticker) for ticker in store.tickers.values()], ["symbol"])
+                upsert_rows(conn, self.tickers, [_ticker_row(ticker) for ticker in store.tickers.values()], ["symbol"])
             if store.balances:
-                _upsert(
+                upsert_rows(
                     conn,
                     self.balances,
                     [_balance_row(account_id, balance) for balance in store.balances.values()],
@@ -99,21 +98,21 @@ class LiveStateRepository:
                 )
             conn.execute(delete(self.positions).where(self.positions.c.account_id == account_id))
             if store.positions:
-                _upsert(
+                upsert_rows(
                     conn,
                     self.positions,
                     [_position_row(position) for position in store.positions.values()],
                     ["account_id", "symbol"],
                 )
             if store.orders:
-                _upsert(
+                upsert_rows(
                     conn,
                     self.orders,
                     [_order_row(order) for order in store.orders.values()],
                     ["account_id", "order_id"],
                 )
             if store.fills:
-                _upsert(
+                upsert_rows(
                     conn,
                     self.fills,
                     [_fill_row(fill) for fill in store.fills.values()],
@@ -145,17 +144,6 @@ class LiveStateRepository:
         for row in fill_rows:
             store.upsert_fill(_fill_from_row(row))
         return store
-
-
-def _upsert(conn, table: Table, rows: list[dict], keys: list[str]) -> None:
-    if not rows:
-        return
-    stmt = sqlite_insert(table).values(rows)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=keys,
-        set_={column.name: getattr(stmt.excluded, column.name) for column in table.columns if column.name not in keys},
-    )
-    conn.execute(stmt)
 
 
 def _ticker_row(ticker: LiveTicker) -> dict:
@@ -237,7 +225,7 @@ def _ticker_from_row(row) -> LiveTicker:
         symbol=row["symbol"],
         last_price=Decimal(row["last_price"]),
         mark_price=Decimal(row["mark_price"]) if row["mark_price"] is not None else None,
-        updated_at=_ensure_utc(row["updated_at"]),
+        updated_at=ensure_utc(row["updated_at"]),
     )
 
 
@@ -246,7 +234,7 @@ def _balance_from_row(row) -> AccountBalance:
         currency=row["currency"],
         equity=Decimal(row["equity"]),
         available=Decimal(row["available"]),
-        updated_at=_ensure_utc(row["updated_at"]),
+        updated_at=ensure_utc(row["updated_at"]),
     )
 
 
@@ -262,7 +250,7 @@ def _position_from_row(row) -> Position:
         liquidation_price=Decimal(row["liquidation_price"]) if row["liquidation_price"] is not None else None,
         margin_mode=row["margin_mode"],
         leverage=int(row["leverage"]),
-        updated_at=_ensure_utc(row["updated_at"]),
+        updated_at=ensure_utc(row["updated_at"]),
     )
 
 
@@ -283,8 +271,8 @@ def _order_from_row(row) -> Order:
         avg_fill_price=Decimal(row["avg_fill_price"]) if row["avg_fill_price"] is not None else None,
         status=row["status"],
         okx_order_id=row["okx_order_id"],
-        created_at=_ensure_utc(row["created_at"]),
-        updated_at=_ensure_utc(row["updated_at"]),
+        created_at=ensure_utc(row["created_at"]),
+        updated_at=ensure_utc(row["updated_at"]),
     )
 
 
@@ -301,11 +289,5 @@ def _fill_from_row(row) -> Fill:
         size=Decimal(row["size"]),
         price=Decimal(row["price"]),
         fee=Decimal(row["fee"]),
-        created_at=_ensure_utc(row["created_at"]),
+        created_at=ensure_utc(row["created_at"]),
     )
-
-
-def _ensure_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)

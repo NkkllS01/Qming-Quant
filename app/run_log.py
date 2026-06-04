@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+from app.serialization import json_ready
 
 
 @dataclass
@@ -27,7 +28,7 @@ class RuntimeEventLogger:
             "component": self.component,
             "command": command,
             "outcome": outcome,
-            "details": _json_ready(details or {}),
+            "details": json_ready(details or {}),
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
@@ -40,15 +41,3 @@ class RuntimeEventLogger:
             raise ValueError("limit must be greater than zero")
         lines = self.path.read_text(encoding="utf-8").splitlines()
         return [json.loads(line) for line in lines[-limit:] if line.strip()]
-
-
-def _json_ready(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _json_ready(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [_json_ready(item) for item in value]
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value

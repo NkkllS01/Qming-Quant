@@ -166,7 +166,6 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
             "0.08",
         ]
     )
-    paper_args = parser.parse_args(["paper-run", "--symbol", "BTC-USDT-SWAP", "--timeframe", "15m"])
     sync_instruments_args = parser.parse_args(["sync-instruments", "--inst-type", "SWAP"])
     sync_funding_args = parser.parse_args(
         ["sync-funding-rates", "--symbol", "BTC-USDT-SWAP", "--limit", "2"]
@@ -221,8 +220,6 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert sim_args.strategy == "trend"
     assert sim_args.current_daily_loss == "30"
     assert sim_args.current_drawdown == "0.08"
-    assert paper_args.command == "paper-run"
-    assert paper_args.symbol == "BTC-USDT-SWAP"
     assert sync_instruments_args.command == "sync-instruments"
     assert sync_instruments_args.inst_type == "SWAP"
     assert sync_funding_args.command == "sync-funding-rates"
@@ -252,6 +249,17 @@ def test_cli_parser_supports_data_sync_and_backtest_commands() -> None:
     assert operator_status_args.skip_gate is True
     assert operator_status_args.include_gate is False
     assert live_order_check_args.position_action == "open"
+
+
+def test_cli_parser_rejects_removed_paper_run_alias() -> None:
+    parser = build_parser()
+
+    try:
+        parser.parse_args(["paper-run", "--symbol", "BTC-USDT-SWAP", "--timeframe", "15m"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("paper-run should not be available in the clean early-stage CLI")
 
 
 class FakeGateway:
@@ -1363,39 +1371,6 @@ def test_run_sim_run_command_filters_candles_by_time_range() -> None:
     assert "start=2024-01-01T02:30:00Z" in output
     assert "end=2024-01-01T03:15:00Z" in output
     assert "persisted=true" in output
-
-
-def test_run_paper_run_command_remains_compatible() -> None:
-    repo = CandleRepository("sqlite:///:memory:")
-    trade_repo = TradeRepository("sqlite:///:memory:")
-    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    repo.upsert_many(
-        [
-            Candle(
-                symbol="BTC-USDT-SWAP",
-                timeframe="15m",
-                timestamp=start + timedelta(minutes=15 * i),
-                open=Decimal(99 + i),
-                high=Decimal(102 + i),
-                low=Decimal(98 + i),
-                close=Decimal(100 + i),
-                volume=Decimal("100"),
-                confirmed=True,
-            )
-            for i in range(40)
-        ]
-    )
-    services = AppServices(
-        gateway=FakeGateway(),
-        candle_repository=repo,
-        trade_repository=trade_repo,
-    )
-    args = build_parser().parse_args(["paper-run", "--symbol", "BTC-USDT-SWAP", "--timeframe", "15m"])
-
-    output = run_command(args, services)
-
-    assert "paper_run" in output
-    assert len(trade_repo.list_fills("cli-paper")) >= 1
 
 
 def test_run_live_sync_command_updates_public_and_private_state_summary() -> None:

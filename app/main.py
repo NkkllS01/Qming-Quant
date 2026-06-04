@@ -4,12 +4,14 @@ import argparse
 import asyncio
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
+from app.cli_parsing import parse_cli_datetime, parse_cli_decimal
 from app.config import Settings
 from app.run_log import RuntimeEventLogger
+from app.serialization import json_ready
 from backtest.engine import BacktestEngine
 from core.models import Candle, Instrument, OrderIntent
 from exchanges.okx.gateway import OKXGateway
@@ -179,17 +181,6 @@ def build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--current-daily-loss", default="0")
     sim.add_argument("--current-drawdown", default="0")
 
-    paper = subparsers.add_parser("paper-run", help="Compatibility alias for sim-run")
-    paper.add_argument("--symbol", default="BTC-USDT-SWAP")
-    paper.add_argument("--timeframe", default="15m")
-    paper.add_argument("--allow-gaps", action="store_true")
-    paper.add_argument("--min-candles", type=int, default=30)
-    paper.add_argument("--start", default=None)
-    paper.add_argument("--end", default=None)
-    paper.add_argument("--strategy", default="trend", choices=["trend", "ma-crossover"])
-    paper.add_argument("--current-daily-loss", default="0")
-    paper.add_argument("--current-drawdown", default="0")
-
     repair = subparsers.add_parser("repair-missing", help="Repair missing local candle ranges")
     repair.add_argument("--symbol", required=True)
     repair.add_argument("--timeframe", default="1m")
@@ -316,8 +307,8 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             store=services.candle_repository,
             fetch_range=services.gateway.history_candles_range,
         )
-        start_at = _parse_cli_datetime(args.start)
-        end_at = _parse_cli_datetime(args.end)
+        start_at = parse_cli_datetime(args.start)
+        end_at = parse_cli_datetime(args.end)
         count = sync.sync_range(args.symbol, args.timeframe, start_at, end_at)
         return (
             f"synced {count} candles for {args.symbol} {args.timeframe} "
@@ -500,9 +491,9 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             f"aggregated {count} candles for {args.symbol} "
             f"{args.source_timeframe}->{args.target_timeframe}"
         )
-    if args.command in {"sim-run", "paper-run"}:
-        run_id = "cli-sim" if args.command == "sim-run" else "cli-paper"
-        output_prefix = "sim_run" if args.command == "sim-run" else "paper_run"
+    if args.command == "sim-run":
+        run_id = "cli-sim"
+        output_prefix = "sim_run"
         candles = _list_command_candles(services, args.symbol, args.timeframe, args.start, args.end)
         gate = _evaluate_candle_data_gate(
             args.symbol,
@@ -537,12 +528,12 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             max_daily_loss=services.max_daily_loss,
             max_total_drawdown_pause=services.max_total_drawdown_pause,
             max_open_positions=services.max_open_positions,
-            current_daily_loss=_parse_cli_decimal(args.current_daily_loss, field_name="current-daily-loss"),
-            current_drawdown=_parse_cli_decimal(args.current_drawdown, field_name="current-drawdown"),
+            current_daily_loss=parse_cli_decimal(args.current_daily_loss, field_name="current-daily-loss"),
+            current_drawdown=parse_cli_decimal(args.current_drawdown, field_name="current-drawdown"),
             tick_size=instrument.tick_size,
             lot_size=instrument.lot_size,
             min_size=instrument.min_size,
-            fill_id_prefix="sim" if args.command == "sim-run" else "paper",
+            fill_id_prefix="sim",
         ).run(strategy, candles)
         persisted = False
         if services.trade_repository is not None:
@@ -817,8 +808,8 @@ def run_command(args: argparse.Namespace, services: AppServices) -> str:
             side=args.side,
             position_action=args.position_action,
             order_type=args.order_type,
-            size=_parse_cli_decimal(args.size, field_name="size"),
-            price=_parse_cli_decimal(args.price, field_name="price") if args.price is not None else None,
+            size=parse_cli_decimal(args.size, field_name="size"),
+            price=parse_cli_decimal(args.price, field_name="price") if args.price is not None else None,
             reduce_only=args.reduce_only,
             client_order_id=args.client_order_id,
         )
@@ -1102,9 +1093,9 @@ def _write_backtest_report(
         "funding_rates": funding_context,
         "initial_equity": str(result.initial_equity),
         "final_equity": str(result.final_equity),
-        "metrics": _json_ready(result.metrics.model_dump()),
-        "trades": _json_ready([trade.model_dump() for trade in result.trades]),
-        "equity_curve": _json_ready([point.model_dump() for point in result.equity_curve]),
+        "metrics": json_ready(result.metrics.model_dump()),
+        "trades": json_ready([trade.model_dump() for trade in result.trades]),
+        "equity_curve": json_ready([point.model_dump() for point in result.equity_curve]),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1143,25 +1134,13 @@ def _write_backtest_blocked_report(
     path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _json_ready(value):
-    if isinstance(value, dict):
-        return {key: _json_ready(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json_ready(item) for item in value]
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
-
-
 def _report_context_window(
     candles: list[Candle],
     start: str | None,
     end: str | None,
 ) -> tuple[datetime | None, datetime | None]:
-    start_at = _parse_cli_datetime(start) if start is not None else (candles[0].timestamp if candles else None)
-    end_at = _parse_cli_datetime(end) if end is not None else (candles[-1].timestamp if candles else None)
+    start_at = parse_cli_datetime(start) if start is not None else (candles[0].timestamp if candles else None)
+    end_at = parse_cli_datetime(end) if end is not None else (candles[-1].timestamp if candles else None)
     return start_at, end_at
 
 
@@ -1219,8 +1198,8 @@ def _list_command_candles(
     start: str | None,
     end: str | None,
 ) -> list[Candle]:
-    start_at = _parse_cli_datetime(start) if start is not None else None
-    end_at = _parse_cli_datetime(end) if end is not None else None
+    start_at = parse_cli_datetime(start) if start is not None else None
+    end_at = parse_cli_datetime(end) if end is not None else None
     if start_at is not None and end_at is not None and end_at < start_at:
         raise ValueError("end must be greater than or equal to start")
     return services.candle_repository.list_candles(symbol, timeframe, start=start_at, end=end_at)
@@ -1278,24 +1257,6 @@ def _evaluate_candle_data_gate(
         min_candles=min_candles,
         missing_ranges_count=len(missing_ranges),
     )
-
-
-def _parse_cli_datetime(value: str) -> datetime:
-    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _parse_cli_decimal(value: str, *, field_name: str) -> Decimal:
-    try:
-        parsed = Decimal(value)
-    except (InvalidOperation, ValueError) as exc:
-        raise ValueError(f"{field_name} must be a valid decimal") from exc
-    if not parsed.is_finite():
-        raise ValueError(f"{field_name} must be a finite decimal")
-    return parsed
 
 
 def main() -> None:

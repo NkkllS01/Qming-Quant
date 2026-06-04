@@ -240,7 +240,3 @@ class SimulationRunResult(BaseModel):
     journal: list[SimulationJournalEvent]
     fills: list[Fill] = []
     positions: list[Position] = []
-
-
-PaperJournalEvent = SimulationJournalEvent
-PaperRunResult = SimulationRunResult

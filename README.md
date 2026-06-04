@@ -246,7 +246,7 @@ python -m app.main sim-run --symbol BTC-USDT-SWAP --timeframe 15m --strategy ma-
 
 `sim-run` also supports `--start` and `--end` for running a fixed local historical window.
 
-`sim-run` uses the same candle data gate as `backtest`: empty, too-short, or gapped local candles are blocked unless the relevant override is passed. It also uses local instrument specs when available and includes the active tick, lot, and minimum sizes in its summary output. `paper-run` remains available as a compatibility alias, but `sim-run` is the preferred command.
+`sim-run` uses the same candle data gate as `backtest`: empty, too-short, or gapped local candles are blocked unless the relevant override is passed. It also uses local instrument specs when available and includes the active tick, lot, and minimum sizes in its summary output.
 
 Manually run read-only live state synchronization:
 

@@ -4,11 +4,11 @@ from decimal import Decimal
 
 from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, DateTime, Integer, MetaData, Numeric, String, Table, create_engine, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 
 from core.models import Candle, CandleSyncState, FundingRate, IndexPrice, Instrument, MarkPrice
 from market_data.candles import find_missing_ranges
+from storage.db import ensure_utc, upsert_rows
 
 
 class CandleRepository:
@@ -58,21 +58,8 @@ class CandleRepository:
             }
             for candle in candles
         ]
-        stmt = sqlite_insert(self.candles).values(rows)
-        update_cols = {
-            "open": stmt.excluded.open,
-            "high": stmt.excluded.high,
-            "low": stmt.excluded.low,
-            "close": stmt.excluded.close,
-            "volume": stmt.excluded.volume,
-            "confirmed": stmt.excluded.confirmed,
-        }
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["symbol", "timeframe", "timestamp"],
-            set_=update_cols,
-        )
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.candles, rows, ["symbol", "timeframe", "timestamp"])
         self.refresh_sync_state(candles[0].symbol, candles[0].timeframe)
 
     def list_candles(
@@ -99,7 +86,7 @@ class CandleRepository:
             Candle(
                 symbol=row["symbol"],
                 timeframe=row["timeframe"],
-                timestamp=_ensure_utc(row["timestamp"]),
+                timestamp=ensure_utc(row["timestamp"]),
                 open=Decimal(row["open"]),
                 high=Decimal(row["high"]),
                 low=Decimal(row["low"]),
@@ -128,29 +115,17 @@ class CandleRepository:
         return state
 
     def upsert_sync_state(self, state: CandleSyncState) -> None:
-        stmt = sqlite_insert(self.candle_sync_state).values(
-            {
-                "symbol": state.symbol,
-                "timeframe": state.timeframe,
-                "first_ts": state.first_ts,
-                "last_ts": state.last_ts,
-                "actual_count": state.actual_count,
-                "missing_ranges": _encode_missing_ranges(state.missing_ranges),
-                "updated_at": state.updated_at,
-            }
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["symbol", "timeframe"],
-            set_={
-                "first_ts": stmt.excluded.first_ts,
-                "last_ts": stmt.excluded.last_ts,
-                "actual_count": stmt.excluded.actual_count,
-                "missing_ranges": stmt.excluded.missing_ranges,
-                "updated_at": stmt.excluded.updated_at,
-            },
-        )
+        row = {
+            "symbol": state.symbol,
+            "timeframe": state.timeframe,
+            "first_ts": state.first_ts,
+            "last_ts": state.last_ts,
+            "actual_count": state.actual_count,
+            "missing_ranges": _encode_missing_ranges(state.missing_ranges),
+            "updated_at": state.updated_at,
+        }
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.candle_sync_state, [row], ["symbol", "timeframe"])
 
     def get_sync_state(self, symbol: str, timeframe: str) -> CandleSyncState | None:
         stmt = (
@@ -165,11 +140,11 @@ class CandleRepository:
         return CandleSyncState(
             symbol=row["symbol"],
             timeframe=row["timeframe"],
-            first_ts=_ensure_utc(row["first_ts"]),
-            last_ts=_ensure_utc(row["last_ts"]),
+            first_ts=ensure_utc(row["first_ts"]),
+            last_ts=ensure_utc(row["last_ts"]),
             actual_count=row["actual_count"],
             missing_ranges=_decode_missing_ranges(row["missing_ranges"]),
-            updated_at=_ensure_utc(row["updated_at"]),
+            updated_at=ensure_utc(row["updated_at"]),
         )
 
 
@@ -211,23 +186,8 @@ class InstrumentRepository:
             }
             for instrument in instruments
         ]
-        stmt = sqlite_insert(self.instruments).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["symbol"],
-            set_={
-                "inst_type": stmt.excluded.inst_type,
-                "base_currency": stmt.excluded.base_currency,
-                "quote_currency": stmt.excluded.quote_currency,
-                "settle_currency": stmt.excluded.settle_currency,
-                "tick_size": stmt.excluded.tick_size,
-                "lot_size": stmt.excluded.lot_size,
-                "min_size": stmt.excluded.min_size,
-                "contract_value": stmt.excluded.contract_value,
-                "state": stmt.excluded.state,
-            },
-        )
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.instruments, rows, ["symbol"])
 
     def get(self, symbol: str) -> Instrument | None:
         stmt = select(self.instruments).where(self.instruments.c.symbol == symbol)
@@ -271,16 +231,8 @@ class FundingRateRepository:
             }
             for rate in rates
         ]
-        stmt = sqlite_insert(self.funding_rates).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["symbol", "funding_time"],
-            set_={
-                "funding_rate": stmt.excluded.funding_rate,
-                "realized_rate": stmt.excluded.realized_rate,
-            },
-        )
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.funding_rates, rows, ["symbol", "funding_time"])
 
     def list_rates(
         self,
@@ -324,16 +276,8 @@ class MarkPriceRepository:
             }
             for price in prices
         ]
-        stmt = sqlite_insert(self.mark_prices).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["symbol"],
-            set_={
-                "mark_price": stmt.excluded.mark_price,
-                "updated_at": stmt.excluded.updated_at,
-            },
-        )
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.mark_prices, rows, ["symbol"])
 
     def list_prices(self) -> list[MarkPrice]:
         stmt = select(self.mark_prices).order_by(self.mark_prices.c.symbol)
@@ -372,16 +316,8 @@ class IndexPriceRepository:
             }
             for price in prices
         ]
-        stmt = sqlite_insert(self.index_prices).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["index_id"],
-            set_={
-                "index_price": stmt.excluded.index_price,
-                "updated_at": stmt.excluded.updated_at,
-            },
-        )
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.index_prices, rows, ["index_id"])
 
     def list_prices(self) -> list[IndexPrice]:
         stmt = select(self.index_prices).order_by(self.index_prices.c.index_id)
@@ -396,12 +332,6 @@ class IndexPriceRepository:
         return _index_price_from_row(row) if row is not None else None
 
 
-def _ensure_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
 def _encode_missing_ranges(ranges: list[tuple[datetime, datetime]]) -> str:
     return ";".join(f"{start.isoformat()}|{end.isoformat()}" for start, end in ranges)
 
@@ -412,7 +342,7 @@ def _decode_missing_ranges(value: str) -> list[tuple[datetime, datetime]]:
     ranges: list[tuple[datetime, datetime]] = []
     for item in value.split(";"):
         start, end = item.split("|", maxsplit=1)
-        ranges.append((_ensure_utc(datetime.fromisoformat(start)), _ensure_utc(datetime.fromisoformat(end))))
+        ranges.append((ensure_utc(datetime.fromisoformat(start)), ensure_utc(datetime.fromisoformat(end))))
     return ranges
 
 
@@ -434,7 +364,7 @@ def _instrument_from_row(row) -> Instrument:
 def _funding_rate_from_row(row) -> FundingRate:
     return FundingRate(
         symbol=row["symbol"],
-        funding_time=_ensure_utc(row["funding_time"]),
+        funding_time=ensure_utc(row["funding_time"]),
         funding_rate=Decimal(row["funding_rate"]),
         realized_rate=Decimal(row["realized_rate"]) if row["realized_rate"] is not None else None,
     )
@@ -444,7 +374,7 @@ def _mark_price_from_row(row) -> MarkPrice:
     return MarkPrice(
         symbol=row["symbol"],
         mark_price=Decimal(row["mark_price"]),
-        updated_at=_ensure_utc(row["updated_at"]),
+        updated_at=ensure_utc(row["updated_at"]),
     )
 
 
@@ -452,5 +382,5 @@ def _index_price_from_row(row) -> IndexPrice:
     return IndexPrice(
         index_id=row["index_id"],
         index_price=Decimal(row["index_price"]),
-        updated_at=_ensure_utc(row["updated_at"]),
+        updated_at=ensure_utc(row["updated_at"]),
     )

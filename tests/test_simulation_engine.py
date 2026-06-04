@@ -3,7 +3,6 @@ from decimal import Decimal
 
 from core.models import Candle
 from core.models import Signal
-from paper.engine import PaperTradingEngine
 from simulation.engine import SimulationTradingEngine
 from strategies.examples.trend import MultiTimeframeTrendStrategy
 
@@ -22,7 +21,7 @@ def _candle(ts: datetime, close: Decimal) -> Candle:
     )
 
 
-def test_paper_trading_engine_runs_strategy_through_risk_and_broker() -> None:
+def test_simulation_trading_engine_runs_strategy_through_risk_and_broker() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [_candle(start + timedelta(minutes=15 * i), Decimal(100 + i)) for i in range(40)]
     strategy = MultiTimeframeTrendStrategy(
@@ -30,7 +29,7 @@ def test_paper_trading_engine_runs_strategy_through_risk_and_broker() -> None:
         bot_id="okx_perp_bot_main",
         strategy_id="btc_trend_15m",
         symbol="BTC-USDT-SWAP",
-        run_id="paper-run-1",
+        run_id="sim-run-1",
     )
     engine = SimulationTradingEngine(initial_equity=Decimal("1000"))
 
@@ -46,7 +45,7 @@ def test_paper_trading_engine_runs_strategy_through_risk_and_broker() -> None:
     assert result.journal[-1].event_type in {"fill", "exit_take_profit"}
 
 
-def test_paper_trading_engine_records_risk_rejection() -> None:
+def test_simulation_trading_engine_records_risk_rejection() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [_candle(start + timedelta(minutes=15 * i), Decimal(100 + i)) for i in range(40)]
     strategy = MultiTimeframeTrendStrategy(
@@ -54,7 +53,7 @@ def test_paper_trading_engine_records_risk_rejection() -> None:
         bot_id="okx_perp_bot_main",
         strategy_id="btc_trend_15m",
         symbol="BTC-USDT-SWAP",
-        run_id="paper-run-1",
+        run_id="sim-run-1",
     )
     engine = SimulationTradingEngine(initial_equity=Decimal("1000"), max_open_positions=0)
 
@@ -68,7 +67,7 @@ def test_paper_trading_engine_records_risk_rejection() -> None:
     assert result.journal[-1].event_type == "risk_rejected"
 
 
-def test_paper_trading_engine_rejects_when_daily_loss_limit_is_reached() -> None:
+def test_simulation_trading_engine_rejects_when_daily_loss_limit_is_reached() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [_candle(start + timedelta(minutes=15 * i), Decimal(100 + i)) for i in range(2)]
     engine = SimulationTradingEngine(
@@ -84,7 +83,7 @@ def test_paper_trading_engine_rejects_when_daily_loss_limit_is_reached() -> None
     assert result.journal[-1].message == "daily loss limit reached"
 
 
-def test_paper_trading_engine_rejects_when_drawdown_pause_is_reached() -> None:
+def test_simulation_trading_engine_rejects_when_drawdown_pause_is_reached() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [_candle(start + timedelta(minutes=15 * i), Decimal(100 + i)) for i in range(2)]
     engine = SimulationTradingEngine(
@@ -105,7 +104,7 @@ class OneShotLongStrategy:
     bot_id = "okx_perp_bot_main"
     strategy_id = "one_shot_long"
     symbol = "BTC-USDT-SWAP"
-    run_id = "paper-run-1"
+    run_id = "sim-run-1"
     timeframe = "15m"
 
     def __init__(self) -> None:
@@ -133,7 +132,7 @@ class OneShotLongStrategy:
         ]
 
 
-def test_paper_trading_engine_fills_signal_on_next_candle_open() -> None:
+def test_simulation_trading_engine_fills_signal_on_next_candle_open() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [
         _candle(start, Decimal("100")),
@@ -156,9 +155,10 @@ def test_paper_trading_engine_fills_signal_on_next_candle_open() -> None:
     assert result.fills_count == 1
     assert result.fills[0].price == Decimal("120")
     assert result.positions[0].entry_price == Decimal("120")
+    assert result.fills[0].fill_id == "sim-1"
 
 
-def test_paper_trading_engine_closes_position_when_take_profit_is_hit() -> None:
+def test_simulation_trading_engine_closes_position_when_take_profit_is_hit() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [
         _candle(start, Decimal("100")),
@@ -197,7 +197,7 @@ def test_paper_trading_engine_closes_position_when_take_profit_is_hit() -> None:
     assert result.journal[-1].event_type == "exit_take_profit"
 
 
-def test_paper_trading_engine_closes_position_at_stop_loss_before_take_profit() -> None:
+def test_simulation_trading_engine_closes_position_at_stop_loss_before_take_profit() -> None:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     candles = [
         _candle(start, Decimal("100")),
@@ -233,19 +233,3 @@ def test_paper_trading_engine_closes_position_at_stop_loss_before_take_profit() 
     assert result.positions_count == 0
     assert result.final_equity == Decimal("999.00")
     assert result.journal[-1].event_type == "exit_stop_loss"
-
-
-def test_paper_trading_engine_keeps_legacy_fill_id_prefix() -> None:
-    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    candles = [
-        _candle(start, Decimal("100")),
-        _candle(start + timedelta(minutes=15), Decimal("101")),
-    ]
-
-    result = PaperTradingEngine(initial_equity=Decimal("1000")).run(
-        OneShotLongStrategy(),
-        candles,
-    )
-
-    assert isinstance(PaperTradingEngine(initial_equity=Decimal("1000")), SimulationTradingEngine)
-    assert result.fills[0].fill_id == "paper-1"

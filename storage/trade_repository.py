@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal
-
 from sqlalchemy import Column, DateTime, MetaData, Numeric, String, Table, create_engine, delete, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 
 from core.models import Fill, Position, SimulationJournalEvent
+from storage.db import decimal_from_db, ensure_utc, upsert_rows
 
 
 class TradeRepository:
@@ -72,21 +69,6 @@ class TradeRepository:
         self._upsert_positions(run_id, positions)
         self._upsert_journal(run_id, journal)
 
-    def save_paper_run(
-        self,
-        *,
-        run_id: str,
-        fills: list[Fill],
-        positions: list[Position],
-        journal: list[SimulationJournalEvent],
-    ) -> None:
-        self.save_simulation_run(
-            run_id=run_id,
-            fills=fills,
-            positions=positions,
-            journal=journal,
-        )
-
     def _delete_run_snapshot(self, run_id: str) -> None:
         with self.engine.begin() as conn:
             conn.execute(delete(self.fills).where(self.fills.c.run_id == run_id))
@@ -113,24 +95,8 @@ class TradeRepository:
             }
             for fill in fills
         ]
-        stmt = sqlite_insert(self.fills).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["run_id", "fill_id"],
-            set_={
-                "account_id": stmt.excluded.account_id,
-                "bot_id": stmt.excluded.bot_id,
-                "strategy_id": stmt.excluded.strategy_id,
-                "symbol": stmt.excluded.symbol,
-                "client_order_id": stmt.excluded.client_order_id,
-                "side": stmt.excluded.side,
-                "size": stmt.excluded.size,
-                "price": stmt.excluded.price,
-                "fee": stmt.excluded.fee,
-                "created_at": stmt.excluded.created_at,
-            },
-        )
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.fills, rows, ["run_id", "fill_id"])
 
     def _upsert_positions(self, run_id: str, positions: list[Position]) -> None:
         if not positions:
@@ -151,22 +117,8 @@ class TradeRepository:
             }
             for position in positions
         ]
-        stmt = sqlite_insert(self.positions).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["run_id", "account_id", "symbol"],
-            set_={
-                "direction": stmt.excluded.direction,
-                "size": stmt.excluded.size,
-                "entry_price": stmt.excluded.entry_price,
-                "mark_price": stmt.excluded.mark_price,
-                "unrealized_pnl": stmt.excluded.unrealized_pnl,
-                "margin_mode": stmt.excluded.margin_mode,
-                "leverage": stmt.excluded.leverage,
-                "updated_at": stmt.excluded.updated_at,
-            },
-        )
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.positions, rows, ["run_id", "account_id", "symbol"])
 
     def _upsert_journal(self, run_id: str, journal: list[SimulationJournalEvent]) -> None:
         if not journal:
@@ -183,19 +135,8 @@ class TradeRepository:
             }
             for index, event in enumerate(journal)
         ]
-        stmt = sqlite_insert(self.journal).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["run_id", "event_index"],
-            set_={
-                "event_type": stmt.excluded.event_type,
-                "symbol": stmt.excluded.symbol,
-                "strategy_id": stmt.excluded.strategy_id,
-                "message": stmt.excluded.message,
-                "timestamp": stmt.excluded.timestamp,
-            },
-        )
         with self.engine.begin() as conn:
-            conn.execute(stmt)
+            upsert_rows(conn, self.journal, rows, ["run_id", "event_index"])
 
     def list_fills(self, run_id: str) -> list[Fill]:
         stmt = select(self.fills).where(self.fills.c.run_id == run_id).order_by(self.fills.c.created_at)
@@ -211,10 +152,10 @@ class TradeRepository:
                 fill_id=row["fill_id"],
                 client_order_id=row["client_order_id"],
                 side=row["side"],
-                size=_decimal(row["size"]),
-                price=_decimal(row["price"]),
-                fee=_decimal(row["fee"]),
-                created_at=_ensure_utc(row["created_at"]),
+                size=decimal_from_db(row["size"]),
+                price=decimal_from_db(row["price"]),
+                fee=decimal_from_db(row["fee"]),
+                created_at=ensure_utc(row["created_at"]),
             )
             for row in rows
         ]
@@ -228,13 +169,13 @@ class TradeRepository:
                 account_id=row["account_id"],
                 symbol=row["symbol"],
                 direction=row["direction"],
-                size=_decimal(row["size"]),
-                entry_price=_decimal(row["entry_price"]),
-                mark_price=_decimal(row["mark_price"]),
-                unrealized_pnl=_decimal(row["unrealized_pnl"]),
+                size=decimal_from_db(row["size"]),
+                entry_price=decimal_from_db(row["entry_price"]),
+                mark_price=decimal_from_db(row["mark_price"]),
+                unrealized_pnl=decimal_from_db(row["unrealized_pnl"]),
                 margin_mode=row["margin_mode"],
                 leverage=int(row["leverage"]),
-                updated_at=_ensure_utc(row["updated_at"]),
+                updated_at=ensure_utc(row["updated_at"]),
             )
             for row in rows
         ]
@@ -249,18 +190,7 @@ class TradeRepository:
                 symbol=row["symbol"],
                 strategy_id=row["strategy_id"],
                 message=row["message"],
-                timestamp=_ensure_utc(row["timestamp"]),
+                timestamp=ensure_utc(row["timestamp"]),
             )
             for row in rows
         ]
-
-
-def _ensure_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def _decimal(value) -> Decimal:
-    rounded = Decimal(str(value)).quantize(Decimal("0.000000000001"))
-    return rounded.quantize(Decimal("0.000000000000000001"))

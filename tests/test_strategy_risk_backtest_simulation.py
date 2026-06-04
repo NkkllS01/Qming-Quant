@@ -7,7 +7,6 @@ from execution.order_factory import OrderFactory
 from risk.manager import PortfolioRiskManager
 from risk.symbol_lease import SymbolLeaseManager
 from simulation.broker import SimulationBroker
-from paper.broker import PaperBroker
 from strategies.examples.trend import MultiTimeframeTrendStrategy
 from strategies.runner import StrategyRunner
 
@@ -248,8 +247,8 @@ def test_simulation_broker_fills_market_order_and_updates_position() -> None:
     assert broker.positions["BTC-USDT-SWAP"].size == Decimal("0.1")
 
 
-def test_paper_broker_keeps_legacy_fill_id_prefix() -> None:
-    broker = PaperBroker(initial_equity=Decimal("1000"))
+def test_simulation_broker_uses_sim_fill_id_prefix() -> None:
+    broker = SimulationBroker(initial_equity=Decimal("1000"))
     intent = OrderIntent(
         account_id="okx_sub_main",
         bot_id="okx_perp_bot_main",
@@ -267,7 +266,7 @@ def test_paper_broker_keeps_legacy_fill_id_prefix() -> None:
 
     fill = broker.execute(intent, market_price=Decimal("100"))
 
-    assert fill.fill_id == "paper-1"
+    assert fill.fill_id == "sim-1"
 
 
 def test_backtest_engine_generates_metrics_from_strategy() -> None:
