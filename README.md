@@ -13,6 +13,13 @@ Design docs:
 
 ![Qiming Quant architecture](docs/qiming-architecture.svg)
 
+Architecture layers:
+
+- OKX gateway: REST signing, public/private WebSocket runtime, and response mapping.
+- Local core: market-data sync, strategy signals, simulation/backtest, live state, and execution core.
+- Safety boundary: pre-live readiness, emergency pause, trading gate, reconciliation, and order policy.
+- Local audit: SQLite state plus runtime logs for candles, instruments, balances, orders, fills, and safety state.
+
 Data first. Local audit. Fail closed. No automatic live trading until readiness checks pass.
 
 ## Safety Boundary
