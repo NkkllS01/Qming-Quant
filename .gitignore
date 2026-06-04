@@ -8,3 +8,4 @@ trade.db
 .env
 logs/
 test-runtime-events.jsonl
+test-runtime-events-phase4-*.jsonl

@@ -66,6 +66,12 @@ Pre-live order dry-run smoke test:
 python scripts/prelive_order_check.py
 ```
 
+Phase 4 local monitoring smoke test:
+
+```powershell
+python scripts/phase4_monitoring_check.py
+```
+
 Optional environment variables:
 
 ```powershell
